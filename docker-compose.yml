@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: smart-schedule-postgres-c
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smart_schedule}
+      POSTGRES_USER: ${POSTGRES_USER:-smart_schedule}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smart_schedule}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-smart_schedule} -d ${POSTGRES_DB:-smart_schedule}
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres_data_c:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: smart-schedule-api-c
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_NAME: Smart Schedule MVP
+      ENVIRONMENT: dev
+      DEBUG: "true"
+      API_PREFIX: /api
+      POSTGRES_DB: ${POSTGRES_DB:-smart_schedule}
+      POSTGRES_USER: ${POSTGRES_USER:-smart_schedule}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smart_schedule}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://smart_schedule:smart_schedule@postgres:5432/smart_schedule}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-3072}
+      SQLALCHEMY_ECHO: "false"
+      JWT_SECRET_KEY: dev-change-me
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "120"
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://192.168.1.101:5173,http://localhost,https://localhost,capacitor://localhost}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-gemini-2.5-flash}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-gemini-embedding-001}
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "python -m app.scripts.bootstrap_migrations &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: smart-schedule-frontend-c
+    depends_on:
+      - api
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api}
+    ports:
+      - "5173:5173"
+
+volumes:
+  postgres_data_c:
