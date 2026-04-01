@@ -2,9 +2,7 @@
   <div class="rag-container">
     <section class="header-section">
       <h2 class="view-title">知识库问答</h2>
-      <p class="view-subtitle">
-        只有已经 Push 到云端、允许纳入知识库并完成重建的日程，才会进入检索和 AI 问答上下文。
-      </p>
+      <p class="view-subtitle">基于日程知识库的检索与 AI 问答</p>
     </section>
 
     <section class="panel status-panel">
@@ -12,9 +10,7 @@
         <van-icon name="cluster-o" color="var(--color-primary)" size="20" />
         <h2 class="panel-title">知识库状态</h2>
       </div>
-      <p class="panel-subtitle">
-        这里会明确区分未上传、已上传但未建库、已建库但未命中，以及 ready 四种状态。
-      </p>
+
 
       <div class="status-grid">
         <div class="status-card">
@@ -56,9 +52,10 @@
       </div>
     </section>
 
-    <section class="panel query-panel">
-      <van-field
-        v-model="question"
+    <div class="rag-main-content">
+      <section class="panel query-panel">
+        <van-field
+          v-model="question"
         label-align="top"
         label="问题"
         placeholder="例如：我下一场需要准备的会议在哪里？"
@@ -104,6 +101,7 @@
         </div>
       </div>
     </section>
+    </div>
   </div>
 </template>
 
@@ -537,5 +535,32 @@ function formatError(error: unknown, fallback: string): string {
   font-size: var(--font-size-sm);
   color: var(--text-main);
   line-height: 1.5;
+}
+
+.rag-main-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+@media (min-width: 1024px) {
+  .rag-container {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    grid-template-rows: auto 1fr;
+    gap: var(--spacing-xl);
+  }
+  .header-section {
+    grid-column: 1 / -1;
+    padding-bottom: 0;
+  }
+  .status-panel {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .rag-main-content {
+    grid-column: 2;
+    grid-row: 2;
+  }
 }
 </style>

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 
 import { useAuthStore } from "@/stores/auth";
 import { pinia } from "@/stores/pinia";
+import AdminView from "@/views/AdminView.vue";
 import HomeView from "@/views/HomeView.vue";
 import ParseView from "@/views/ParseView.vue";
 import PublicShareView from "@/views/PublicShareView.vue";
@@ -45,21 +46,31 @@ export const router = createRouter({
       name: "share-public",
       component: PublicShareView,
       meta: { hideChrome: true }
+    },
+    {
+      path: "/admin",
+      name: "admin",
+      component: AdminView,
+      meta: { requiresAuth: true, requiresAdmin: true, hideChrome: true }
     }
   ]
 });
 
 router.beforeEach(async (to) => {
-  if (!to.meta.requiresAuth) {
+  if (!to.meta.requiresAuth && !to.meta.requiresAdmin) {
     return true;
   }
 
   const authStore = useAuthStore(pinia);
   await authStore.hydrate();
 
-  if (authStore.isAuthenticated) {
-    return true;
+  if (!authStore.isAuthenticated) {
+    return { name: "home" };
   }
 
-  return { name: "home" };
+  if (to.meta.requiresAdmin && authStore.user?.role !== "admin") {
+    return { name: "home" };
+  }
+
+  return true;
 });

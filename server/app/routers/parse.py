@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.core.auth import get_current_user_id
+from app.core.auth import get_current_user_id_ai_safe
 from app.schemas import (
     ParseDraftRequest,
     ParseDraftResponse,
@@ -20,12 +20,12 @@ router = APIRouter(prefix="/parse", tags=["parse"])
 
 
 @router.post("/schedule-draft", response_model=ParseDraftResponse, status_code=status.HTTP_200_OK)
-def parse_schedule_draft(
+async def parse_schedule_draft(
     payload: ParseDraftRequest,
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> ParseDraftResponse:
     try:
-        return ParseService.build_schedule_draft(payload, user_id=user_id)
+        return await ParseService.build_schedule_draft(payload, user_id=user_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
@@ -35,12 +35,12 @@ def _sse_event(event: str, data: dict) -> str:
 
 
 @router.post("/schedule-draft/stream", status_code=status.HTTP_200_OK)
-def parse_schedule_draft_stream(
+async def parse_schedule_draft_stream(
     payload: ParseDraftRequest,
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> StreamingResponse:
     try:
-        draft_response = ParseService.build_schedule_draft(payload, user_id=user_id)
+        draft_response = await ParseService.build_schedule_draft(payload, user_id=user_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
@@ -65,24 +65,24 @@ def parse_schedule_draft_stream(
 
 
 @router.post("/sessions", response_model=ParseSessionResponse, status_code=status.HTTP_200_OK)
-def create_parse_session(
+async def create_parse_session(
     payload: ParseSessionCreateRequest,
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> ParseSessionResponse:
     try:
-        return ParseService.create_session(payload, user_id=user_id)
+        return await ParseService.create_session(payload, user_id=user_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/messages", response_model=ParseSessionResponse, status_code=status.HTTP_200_OK)
-def append_parse_session_message(
+async def append_parse_session_message(
     session_id: str,
     payload: ParseSessionMessageRequest,
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> ParseSessionResponse:
     try:
-        return ParseService.append_session_message(session_id, payload, user_id=user_id)
+        return await ParseService.append_session_message(session_id, payload, user_id=user_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parse session not found.") from exc
     except RuntimeError as exc:
@@ -90,12 +90,14 @@ def append_parse_session_message(
 
 
 @router.patch("/sessions/{session_id}/draft", response_model=ParseSessionResponse, status_code=status.HTTP_200_OK)
-def patch_parse_session_draft(
+async def patch_parse_session_draft(
     session_id: str,
     payload: ParseSessionDraftPatchRequest,
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> ParseSessionResponse:
     try:
-        return ParseService.patch_session_draft(session_id, payload, user_id=user_id)
+        return await ParseService.patch_session_draft(session_id, payload, user_id=user_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parse session not found.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc

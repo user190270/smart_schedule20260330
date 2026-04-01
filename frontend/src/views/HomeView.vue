@@ -1,22 +1,19 @@
 <template>
   <div class="home-container">
     <section class="welcome-section">
-      <h1 class="welcome-title">云端同步与知识库状态</h1>
-      <p class="welcome-subtitle">
-        日程页始终以本地仓为主。这里提供显式的 Push、Pull 和 Rebuild Knowledge Base 操作，以及当前云端连接、同步和知识库状态。
-      </p>
+      <h1 class="welcome-title">同步与状态</h1>
+      <p class="welcome-subtitle">云端连接、同步操作与知识库状态一览</p>
     </section>
 
-    <section class="panel auth-panel">
-      <div class="panel-header">
+    <div class="home-panels-grid">
+      <section class="panel auth-panel">
+        <div class="panel-header">
         <van-icon name="user-o" size="20" color="var(--color-accent)" />
         <h2 class="panel-title">账户状态</h2>
       </div>
 
       <div v-if="!authStore.isAuthenticated" class="auth-form-container">
-        <p class="panel-subtitle">
-          未登录时，你仍然可以在本地仓创建、编辑和删除日程；Push、Pull、分享、知识库重建和 RAG 仍需要登录。
-        </p>
+
         <van-form @submit="submitAuth" class="custom-form">
           <van-field v-model="username" name="username" placeholder="用户名" left-icon="contact" />
           <van-field v-model="password" name="password" type="password" placeholder="密码" left-icon="lock" />
@@ -50,9 +47,7 @@
         <van-icon name="cluster-o" size="20" color="var(--color-primary)" />
         <h2 class="panel-title">Push / Pull / Rebuild Knowledge Base</h2>
       </div>
-      <p class="panel-subtitle">
-        Push 将本地仓中的新增、更新和待删除云端动作提交到云端；Pull 只做合并，不会替代你的本地仓；知识库重建只会处理允许纳入知识库的云端日程。
-      </p>
+
 
       <div class="sync-actions">
         <van-button type="primary" round :disabled="!authStore.isAuthenticated" @click="runPush">Push</van-button>
@@ -63,82 +58,99 @@
         <van-button size="small" icon="play-circle-o" round @click="runHealthCheck">检查连接</van-button>
       </div>
 
-      <div class="status-grid">
+      <div class="status-grid core-stats">
         <div class="status-card">
-          <span class="status-label">登录状态</span>
-          <strong class="status-value">{{ authStore.isAuthenticated ? "已登录" : "未登录" }}</strong>
+          <span class="status-label">本地日程</span>
+          <strong class="status-value status-value-lg">{{ localScheduleStore.activeCount }}</strong>
         </div>
         <div class="status-card">
-          <span class="status-label">云端连接</span>
-          <strong class="status-value" :class="connectionClass">{{ connectionLabel }}</strong>
+          <span class="status-label">云端日程</span>
+          <strong class="status-value status-value-lg">{{ syncStore.status?.cloud_schedule_count ?? 0 }}</strong>
         </div>
         <div class="status-card">
-          <span class="status-label">本地日程数</span>
-          <strong class="status-value">{{ localScheduleStore.activeCount }}</strong>
+          <span class="status-label">待同步</span>
+          <strong class="status-value status-value-lg" :class="{ 'text-warning': pendingSyncTotal > 0 }">{{ pendingSyncTotal }}</strong>
         </div>
         <div class="status-card">
-          <span class="status-label">云端日程数</span>
-          <strong class="status-value">{{ syncStore.status?.cloud_schedule_count ?? 0 }}</strong>
-        </div>
-        <div class="status-card">
-          <span class="status-label">允许纳入知识库</span>
-          <strong class="status-value">{{ syncStore.status?.knowledge_base_eligible_schedule_count ?? 0 }}</strong>
-        </div>
-        <div class="status-card">
-          <span class="status-label">已索引日程数</span>
-          <strong class="status-value">{{ syncStore.status?.indexed_schedule_count ?? 0 }}</strong>
-        </div>
-        <div class="status-card">
-          <span class="status-label">已索引 chunks</span>
-          <strong class="status-value">{{ syncStore.status?.indexed_chunk_count ?? 0 }}</strong>
-        </div>
-        <div class="status-card">
-          <span class="status-label">最近知识库重建</span>
-          <strong class="status-value">{{ formatTime(syncStore.status?.last_knowledge_rebuild_at ?? null) }}</strong>
-        </div>
-        <div class="status-card">
-          <span class="status-label">待上传新增</span>
-          <strong class="status-value">{{ localScheduleStore.pendingCreateCount }}</strong>
-        </div>
-        <div class="status-card">
-          <span class="status-label">待上传更新</span>
-          <strong class="status-value">{{ localScheduleStore.pendingUpdateCount }}</strong>
-        </div>
-        <div class="status-card">
-          <span class="status-label">待删除云端</span>
-          <strong class="status-value">{{ localScheduleStore.pendingDeleteCloudCount }}</strong>
-        </div>
-        <div class="status-card">
-          <span class="status-label">同步冲突</span>
-          <strong class="status-value">{{ localScheduleStore.conflictCount }}</strong>
+          <span class="status-label">冲突</span>
+          <strong class="status-value status-value-lg" :class="{ 'text-danger': localScheduleStore.conflictCount > 0 }">{{ localScheduleStore.conflictCount }}</strong>
         </div>
       </div>
 
-      <van-cell-group inset class="custom-group">
-        <van-cell title="API Base URL" :value="apiBaseUrl" />
-        <van-cell title="本地存储" :value="localStorageLabel" />
-        <van-cell title="最近 Push 反馈" :value="syncStore.deviceMeta.lastPushMessage ?? '暂无'" />
-        <van-cell title="最近 Pull 反馈" :value="syncStore.deviceMeta.lastPullMessage ?? '暂无'" />
-        <van-cell title="最近知识库重建反馈" :value="syncStore.status?.last_knowledge_rebuild_message ?? '暂无'" />
-      </van-cell-group>
-
-      <div class="action-feedback">
-        <div class="feedback-line">
-          <span class="feedback-label">Push</span>
-          <span class="feedback-text">{{ formatAction(syncStore.pushAction.status, syncStore.pushAction.message) }}</span>
-        </div>
-        <div class="feedback-line">
-          <span class="feedback-label">Pull</span>
-          <span class="feedback-text">{{ formatAction(syncStore.pullAction.status, syncStore.pullAction.message) }}</span>
-        </div>
-        <div class="feedback-line">
-          <span class="feedback-label">重建知识库</span>
-          <span class="feedback-text">
-            {{ formatAction(syncStore.rebuildAction.status, syncStore.rebuildAction.message) }}
-          </span>
-        </div>
+      <div class="connection-bar">
+        <span class="connection-item">
+          <van-icon :name="authStore.isAuthenticated ? 'passed' : 'close'" :color="authStore.isAuthenticated ? '#137333' : '#999'" size="14" />
+          {{ authStore.isAuthenticated ? '已登录' : '未登录' }}
+        </span>
+        <span class="connection-item">
+          <van-icon :name="syncStore.healthStatus === 'connected' ? 'passed' : 'close'" :color="syncStore.healthStatus === 'connected' ? '#137333' : '#999'" size="14" />
+          <span :class="connectionClass">{{ connectionLabel }}</span>
+        </span>
       </div>
-    </section>
+
+      <van-collapse v-model="activeCollapse" class="detail-collapse">
+        <van-collapse-item title="详细状态" name="detail">
+          <div class="status-grid">
+            <div class="status-card">
+              <span class="status-label">待上传新增</span>
+              <strong class="status-value">{{ localScheduleStore.pendingCreateCount }}</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">待上传更新</span>
+              <strong class="status-value">{{ localScheduleStore.pendingUpdateCount }}</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">待删除云端</span>
+              <strong class="status-value">{{ localScheduleStore.pendingDeleteCloudCount }}</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">允许纳入知识库</span>
+              <strong class="status-value">{{ syncStore.status?.knowledge_base_eligible_schedule_count ?? 0 }}</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">已索引日程</span>
+              <strong class="status-value">{{ syncStore.status?.indexed_schedule_count ?? 0 }}</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">已索引 chunks</span>
+              <strong class="status-value">{{ syncStore.status?.indexed_chunk_count ?? 0 }}</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">最近知识库重建</span>
+              <strong class="status-value">{{ formatTime(syncStore.status?.last_knowledge_rebuild_at ?? null) }}</strong>
+            </div>
+          </div>
+        </van-collapse-item>
+
+        <van-collapse-item title="系统信息" name="system">
+          <van-cell-group inset class="custom-group">
+            <van-cell title="API Base URL" :value="apiBaseUrl" />
+            <van-cell title="本地存储" :value="localStorageLabel" />
+            <van-cell title="最近 Push 反馈" :value="syncStore.deviceMeta.lastPushMessage ?? '暂无'" />
+            <van-cell title="最近 Pull 反馈" :value="syncStore.deviceMeta.lastPullMessage ?? '暂无'" />
+            <van-cell title="最近知识库重建反馈" :value="syncStore.status?.last_knowledge_rebuild_message ?? '暂无'" />
+          </van-cell-group>
+
+          <div class="action-feedback">
+            <div class="feedback-line">
+              <span class="feedback-label">Push</span>
+              <span class="feedback-text">{{ formatAction(syncStore.pushAction.status, syncStore.pushAction.message) }}</span>
+            </div>
+            <div class="feedback-line">
+              <span class="feedback-label">Pull</span>
+              <span class="feedback-text">{{ formatAction(syncStore.pullAction.status, syncStore.pullAction.message) }}</span>
+            </div>
+            <div class="feedback-line">
+              <span class="feedback-label">重建知识库</span>
+              <span class="feedback-text">
+                {{ formatAction(syncStore.rebuildAction.status, syncStore.rebuildAction.message) }}
+              </span>
+            </div>
+          </div>
+        </van-collapse-item>
+      </van-collapse>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -159,6 +171,13 @@ const localScheduleStore = useLocalScheduleStore();
 const loadingAuth = ref(false);
 const username = ref("demo_user");
 const password = ref("demo_pass_123");
+const activeCollapse = ref<string[]>([]);
+
+const pendingSyncTotal = computed(() =>
+  localScheduleStore.pendingCreateCount +
+  localScheduleStore.pendingUpdateCount +
+  localScheduleStore.pendingDeleteCloudCount
+);
 
 const apiBaseUrl = appStore.apiBaseUrl;
 
@@ -461,6 +480,43 @@ function formatAction(status: string, message: string | null): string {
   margin-bottom: var(--spacing-md);
 }
 
+.core-stats .status-card {
+  text-align: center;
+  padding: var(--spacing-md) var(--spacing-sm);
+}
+
+.status-value-lg {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+}
+
+.connection-bar {
+  display: flex;
+  gap: var(--spacing-lg);
+  justify-content: center;
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.connection-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.detail-collapse {
+  margin-bottom: var(--spacing-md);
+}
+
+.detail-collapse .status-grid {
+  margin-bottom: 0;
+}
+
+.text-warning {
+  color: #e37400;
+}
+
 .status-card {
   padding: var(--spacing-sm);
   border-radius: var(--radius-md);
@@ -519,5 +575,25 @@ function formatAction(status: string, message: string | null): string {
 
 .text-danger {
   color: #c5221f;
+}
+
+.home-panels-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+@media (min-width: 1024px) {
+  .home-panels-grid {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    align-items: start;
+    gap: var(--spacing-xl);
+  }
+
+  .welcome-section {
+    text-align: left;
+    padding: var(--spacing-sm) 0;
+  }
 }
 </style>

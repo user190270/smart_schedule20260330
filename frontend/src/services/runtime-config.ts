@@ -1,6 +1,6 @@
 import { Capacitor } from "@capacitor/core";
 
-const DEFAULT_WEB_API_BASE_URL = "http://localhost:8000/api";
+const DEFAULT_WEB_API_BASE_URL = "http://43.131.244.210/api";
 const DEFAULT_LAN_API_BASE_URL = "http://192.168.1.100:8000/api";
 
 function normalizeUrl(value: string): string {

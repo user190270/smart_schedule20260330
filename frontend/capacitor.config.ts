@@ -5,6 +5,7 @@ const config: CapacitorConfig = {
   appName: "Smart Schedule",
   webDir: "dist",
   server: {
+    androidScheme: "http",
     cleartext: true
   }
 };

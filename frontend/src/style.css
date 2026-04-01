@@ -148,3 +148,41 @@ body {
   transform: translateY(4px);
 }
 
+/* -----------------------------
+   Desktop Specific ( >= 1024px )
+   Strictly isolate desktop enhancements
+-------------------------------- */
+@media (min-width: 1024px) {
+  .app-header {
+    padding: var(--spacing-md) calc(50vw - 600px);
+  }
+
+  /* When viewport > 1200px, calc creates safe margins. Below 1200px but > 1024px, we need minimum padding. */
+  @media (max-width: 1264px) {
+    .app-header {
+      padding: var(--spacing-md) var(--spacing-xl);
+    }
+  }
+
+  .header-main {
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .app-main {
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+    padding: var(--spacing-xl) var(--spacing-xl) 40px; /* Reduced bottom padding since no tabbar */
+  }
+
+  .panel {
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  
+  .panel:hover {
+    box-shadow: var(--shadow-lg);
+  }
+}
+

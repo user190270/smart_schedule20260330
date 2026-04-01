@@ -18,6 +18,9 @@ from tests.db_helpers import reset_database
 class RagWorkflowTestCase(unittest.TestCase):
     def setUp(self) -> None:
         reset_database()
+        runtime_patcher = patch("app.services.rag_service.RagService._get_runtime", return_value=None)
+        runtime_patcher.start()
+        self.addCleanup(runtime_patcher.stop)
         self.client = TestClient(app)
         self.user_a_id, self.headers_a = register_user(self.client, "rag_user_a")
         self.user_b_id, self.headers_b = register_user(self.client, "rag_user_b")

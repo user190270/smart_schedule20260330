@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 5173 --strictPort",
     "build": "vue-tsc --noEmit && vite build",
     "build:mobile": "vue-tsc --noEmit && vite build --mode mobile --base ./",
     "preview": "vite preview",

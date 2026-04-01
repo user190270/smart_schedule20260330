@@ -19,6 +19,8 @@ server/smart_schedule.db
 .env
 server/.env
 frontend/.env.mobile
+frontend/.env.local
+frontend/.env.*.local
 
 .idea/
 server/*.egg-info/
@@ -28,6 +30,9 @@ tmp-edge-profile/
 tmp-device-home*.jpg
 tmp-device-home*.png
 tmp-device-home*.xml
+tmp-emulator-*.png
+tmp-emulator-*.xml
+tmp-realdevice-logcat*.txt
 
 frontend/android/**/build/
 frontend/android/.cxx/

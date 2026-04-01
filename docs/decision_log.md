@@ -584,3 +584,91 @@
 - `impact`:
   - Execution should add explicit session-oriented parse contracts instead of relying on frontend transcript replay alone.
   - Frontend Parse UI still renders and edits draft state, but the authoritative session progression comes from backend session updates.
+
+### D-072
+
+- `status`: active
+- `decision`: The admin surface for this round is a Web page inside the existing frontend project, not a second backend app and not a mobile-primary feature.
+- `reason`:
+  - The product and thesis need a clear user/admin role split, but the current repo already has one backend and one frontend that can host the admin surface.
+  - A browser-facing admin page matches the management use case better than forcing admin operations into the mobile primary flow.
+- `impact`:
+  - Execution adds an admin route/page to the current frontend.
+  - Mobile-first ordinary user navigation remains focused on schedules, parse, knowledge base, and share.
+
+### D-073
+
+- `status`: active
+- `decision`: Reuse the existing `/api/admin/users` and `/api/admin/users/{user_id}` routes as the only admin data contract for this round.
+- `reason`:
+  - Backend admin permissions and user-management operations already exist and are covered by tests.
+  - Reusing the existing contract avoids inventing a redundant admin API and keeps cloud deployment coordination simple.
+- `impact`:
+  - This round is primarily a frontend/admin-surface implementation.
+  - Cloud deployment only needs to pull the updated frontend/backend mainline without reconciling a second admin service.
+
+### D-074
+
+- `status`: active
+- `decision`: Round 17 must restart from `PLAN`; R16 active docs are historical input only.
+- `reason`:
+  - The new requirement changes backend AI architecture and service-layer execution semantics rather than continuing the completed desktop-polish round.
+  - Reusing the R16 active state would incorrectly preserve a frontend-only contract and hide the new LangChain and async acceptance criteria.
+- `impact`:
+  - `docs/working_contract.md`, `docs/current_state.md`, `docs/task_board.md`, and `docs/api_contract.md` are refreshed as a new active round.
+  - Executors must treat R17 as the live planning context and not continue from R16 state.
+
+### D-075
+
+- `status`: active
+- `decision`: LangChain will be introduced as a shared orchestration layer for Parse and RAG while retaining the current pgvector retrieval base and draft-confirm persistence rules.
+- `reason`:
+  - The thesis claim requires real LangChain-backed AI orchestration, but the existing product already has working pgvector retrieval and Parse confirmation semantics that should not be discarded.
+  - Replacing the whole retrieval stack would add risk without being necessary to satisfy the round goal.
+- `impact`:
+  - Parse and RAG execution should converge on shared LangChain-capable runtime seams.
+  - Retrieval SQL and schedule confirmation rules remain compatibility anchors during the refactor.
+
+### D-076
+
+- `status`: active
+- `decision`: AI paths may use short-lived database session scopes that differ from ordinary CRUD request handling, but the round will not rewrite the whole backend into an async-DB architecture.
+- `reason`:
+  - The key requirement is to avoid long external model waits holding transactional resources, not to perform a full persistence-layer rewrite.
+  - Ordinary CRUD, sync, share, and admin paths are already working and should remain low-risk.
+- `impact`:
+  - Execution may introduce AI-specific session helpers or route patterns for read -> external await -> write separation.
+  - Ordinary business routes remain structurally stable unless a small compatibility fix is strictly required.
+
+### D-077
+
+- `status`: active
+- `decision`: Round 17 closes only if both Parse and RAG land on real LangChain-backed core chains.
+- `reason`:
+  - The thesis claim is about the AI service module rather than a single isolated endpoint.
+  - Completing only one chain would still leave the repo unable to support the stronger architecture statement with confidence.
+- `impact`:
+  - Parse-only or RAG-only LangChain integration is not sufficient for acceptance.
+  - Verification and review must demand evidence from both chains.
+
+### D-078
+
+- `status`: active
+- `decision`: AI routes must not keep dependency-injected request-scoped database sessions alive while awaiting external model work.
+- `reason`:
+  - Async model calls only help the architecture claim if the code also stops tying up DB resources during long waits.
+  - The current `get_db` pattern is acceptable for ordinary business routes but weakens the AI isolation argument if reused unchanged across awaited external calls.
+- `impact`:
+  - Execution may move AI-path DB reads and writes into service-owned short sessions.
+  - Review should inspect route and service boundaries, not only coroutine signatures.
+
+### D-079
+
+- `status`: active
+- `decision`: Round 17 closes at a verified local checkpoint; GitHub synchronization and cloud deployment are intentionally deferred.
+- `reason`:
+  - The user explicitly required local development, local testing, and local build verification before any GitHub-mediated or cloud-agent deployment step.
+  - Keeping deployment out of this round avoids mainline / cloud drift while the LangChain + async AI refactor is still being validated.
+- `impact`:
+  - Round-close evidence is local backend regression plus local frontend build.
+  - A future round may start from this terminal checkpoint to handle GitHub push, cloud deployment, and online verification.

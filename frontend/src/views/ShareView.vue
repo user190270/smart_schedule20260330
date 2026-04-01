@@ -2,9 +2,7 @@
   <div class="share-container">
     <section class="panel intro-panel">
       <h2 class="view-title">分享中心</h2>
-      <p class="view-subtitle">
-        只显示已经拥有云端身份的日程。生成分享后，你可以复制 UUID、复制公开链接，或直接在当前应用内打开公开预览。
-      </p>
+      <p class="view-subtitle">为云端日程生成公开分享链接</p>
     </section>
 
     <section class="panel lookup-panel">

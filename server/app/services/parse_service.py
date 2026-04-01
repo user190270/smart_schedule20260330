@@ -7,6 +7,8 @@ import re
 from threading import Lock
 from uuid import uuid4
 
+from pydantic import BaseModel
+
 from app.models.enums import ScheduleSource
 from app.schemas import (
     ParseAgentMessage,
@@ -20,7 +22,7 @@ from app.schemas import (
     ParseSessionResponse,
     ScheduleDraft,
 )
-from app.services.llm_provider import LlmProviderError, OpenAICompatibleProvider
+from app.services.ai_runtime import AiRuntimeError, AiRuntimeUnavailable, LangChainAiRuntime
 
 
 KNOWN_TITLE_KEYWORDS: list[tuple[str, str]] = [
@@ -61,6 +63,7 @@ TIME_POINT_PATTERN = re.compile(
     r"(?:(?:[:：](?P<minute>\d{1,2}))|(?P<half>半))?"
     r"(?:点|时)"
 )
+ISO_DATETIME_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?")
 END_ONLY_PATTERN = re.compile(
     r"(?:到|至|结束|结束于|结束在)\s*"
     r"(?P<hour>\d{1,2})"
@@ -74,9 +77,24 @@ LOCATION_PATTERNS = [
         r"(?=(?:吃饭|开会|上课|讨论|见面|汇报|面试|学习|复盘|训练|演示|答辩|$|，|。|,))"
     ),
     re.compile(r"(?:在|到)\s*(?P<location>[A-Za-z0-9#\-\(\)·\.]{1,40})"),
+    re.compile(r"\bin\s+(?P<location>[A-Za-z][A-Za-z0-9#\-\(\)\. ]{1,40}?)(?=(?:$|[,.]))", re.IGNORECASE),
 ]
 DATE_WORD_PATTERN = re.compile(r"(今天|明天|后天|今早|明早|今晚|下午|上午|早上|中午|晚上|傍晚|下周[一二三四五六日天]|周[一二三四五六日天]|星期[一二三四五六日天])")
 FILLER_PATTERN = re.compile(r"(帮我|安排|记得|需要|想要|请|一下|一个|把|去|在|到)")
+LEADING_LOCATION_TIME_PATTERN = re.compile(
+    r"^(?:(?:今天|明天|后天|今早|明早|今晚|明晚|早上|上午|中午|下午|晚上|傍晚)\s*)*"
+    r"(?:(?:从)?\d{1,2}(?:(?:[:：]\d{1,2})|半)?(?:点|时)?(?:\s*(?:到|至|\-|~)\s*)?)+"
+    r"(?:在|到)?\s*"
+)
+TIME_LIKE_LOCATION_PATTERN = re.compile(
+    r"^(?:(?:今天|明天|后天|今早|明早|今晚|明晚|早上|上午|中午|下午|晚上|傍晚)\s*)*"
+    r"(?:(?:从|到|至|于)\s*)*"
+    r"\d{1,2}(?:(?:[:：]\d{1,2})|半)?(?:点|时)"
+    r"(?:\s*(?:到|至|\-|~)\s*\d{1,2}(?:(?:[:：]\d{1,2})|半)?(?:点|时)?)?"
+    r"(?:\s*(?:开始|结束))?$"
+)
+ABSOLUTE_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}|\d{1,2}月\d{1,2}日")
+CALENDAR_DATE_PATTERN = re.compile(r"(今天|明天|后天|今早|明早|今晚|明晚|下周[一二三四五六日天]|周[一二三四五六日天]|星期[一二三四五六日天])")
 
 
 @dataclass
@@ -187,14 +205,37 @@ def _combine_datetime(target_date: date, target_time: time, reference_time: date
     return datetime.combine(target_date, target_time).replace(tzinfo=reference_time.tzinfo)
 
 
+def _extract_iso_datetimes(text: str) -> list[datetime]:
+    values: list[datetime] = []
+    for match in ISO_DATETIME_PATTERN.finditer(text):
+        parsed = _parse_iso_datetime(match.group(0))
+        if parsed is not None:
+            values.append(parsed)
+    return values
+
+
+def _normalize_location_candidate(raw_location: str) -> str | None:
+    location = raw_location.strip(" ,，。.")
+    if not location:
+        return None
+    location = LEADING_LOCATION_TIME_PATTERN.sub("", location).strip(" ,，。.")
+    location = re.sub(r"^(?:在|到|于)\s*", "", location).strip(" ,，。.")
+    location = re.sub(r"\s*(?:开始|结束)$", "", location).strip(" ,，。.")
+    if not location:
+        return None
+    if TIME_LIKE_LOCATION_PATTERN.fullmatch(location):
+        return None
+    if re.search(r"\d{1,2}(?:(?:[:：]\d{1,2})|半)?(?:点|时)", location):
+        return None
+    return location
+
+
 def _extract_location(text: str) -> str | None:
     for pattern in LOCATION_PATTERNS:
-        match = pattern.search(text)
-        if not match:
-            continue
-        location = match.group("location").strip(" ,，。.")
-        if location:
-            return location
+        for match in pattern.finditer(text):
+            location = _normalize_location_candidate(match.group("location"))
+            if location:
+                return location
     return None
 
 
@@ -223,6 +264,12 @@ def _has_explicit_time(text: str) -> bool:
 
 
 def _extract_temporal_range(text: str, reference_time: datetime) -> tuple[datetime | None, datetime | None]:
+    iso_datetimes = _extract_iso_datetimes(text)
+    if len(iso_datetimes) >= 2:
+        return iso_datetimes[0], iso_datetimes[1]
+    if len(iso_datetimes) == 1:
+        return iso_datetimes[0], None
+
     target_date = _resolve_target_date(text, reference_time)
     meridiem = _resolve_meridiem(text)
 
@@ -259,6 +306,36 @@ def _extract_temporal_range(text: str, reference_time: datetime) -> tuple[dateti
     return None, None
 
 
+def _has_explicit_date_signal(text: str) -> bool:
+    return bool(
+        ISO_DATETIME_PATTERN.search(text)
+        or ABSOLUTE_DATE_PATTERN.search(text)
+        or CALENDAR_DATE_PATTERN.search(text)
+        or WEEKDAY_PATTERN.search(text)
+    )
+
+
+def _replace_datetime_date(value: datetime, target_date: date) -> datetime:
+    return datetime.combine(target_date, value.timetz())
+
+
+def _resolve_session_anchor_date(
+    current_draft: ScheduleDraft | None,
+    latest_message: str,
+    reference_time: datetime,
+) -> date | None:
+    if current_draft is None or _has_explicit_date_signal(latest_message):
+        return None
+    if current_draft.start_time is not None:
+        return current_draft.start_time.date()
+    if current_draft.remark and _has_explicit_date_signal(current_draft.remark):
+        iso_datetimes = _extract_iso_datetimes(current_draft.remark)
+        if iso_datetimes:
+            return iso_datetimes[0].date()
+        return _resolve_target_date(current_draft.remark, reference_time)
+    return None
+
+
 def _extract_follow_up_end_time(text: str, base_start_time: datetime | None, reference_time: datetime) -> datetime | None:
     if base_start_time is None:
         return None
@@ -292,9 +369,19 @@ def _looks_like_follow_up_only(text: str) -> bool:
     return bool(_extract_location(text))
 
 
-def _build_fallback_draft(text: str, reference_time: datetime) -> ScheduleDraft:
+def _build_fallback_draft(
+    text: str,
+    reference_time: datetime,
+    current_draft: ScheduleDraft | None = None,
+) -> ScheduleDraft:
     location = _extract_location(text)
     start_time, end_time = _extract_temporal_range(text, reference_time)
+    anchor_date = _resolve_session_anchor_date(current_draft, text, reference_time)
+    if anchor_date is not None:
+        if start_time is not None:
+            start_time = _replace_datetime_date(start_time, anchor_date)
+        if end_time is not None:
+            end_time = _replace_datetime_date(end_time, anchor_date)
     title = _extract_title(text, location)
     return ScheduleDraft(
         title=title,
@@ -407,64 +494,71 @@ def _extract_json_object(raw_text: str) -> dict | None:
         return None
 
 
+class ParseLLMOutput(BaseModel):
+    title: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    location: str | None = None
+    remark: str | None = None
+    storage_strategy: str | None = None
+
+
 class ParseService:
     _lock = Lock()
     _sessions: dict[str, ParseSessionState] = {}
 
     @staticmethod
-    def _get_provider() -> OpenAICompatibleProvider | None:
+    def _get_runtime() -> LangChainAiRuntime | None:
         try:
-            return OpenAICompatibleProvider.from_settings()
-        except LlmProviderError:
+            return LangChainAiRuntime.from_settings()
+        except AiRuntimeUnavailable:
             return None
 
     @staticmethod
-    def _build_draft_with_provider(text: str, reference_time: datetime, current_draft: ScheduleDraft | None) -> ScheduleDraft:
-        provider = ParseService._get_provider()
-        if provider is None:
-            return ParseService._build_draft_with_fallback(text, reference_time)
+    async def _build_draft_with_langchain(
+        text: str,
+        reference_time: datetime,
+        current_draft: ScheduleDraft | None,
+    ) -> ScheduleDraft:
+        runtime = ParseService._get_runtime()
+        if runtime is None:
+            return ParseService._build_draft_with_fallback(text, reference_time, current_draft)
 
         base_draft = current_draft or ScheduleDraft(source=ScheduleSource.AI_PARSED)
-        fallback = ParseService._build_draft_with_fallback(text, reference_time)
+        fallback = ParseService._build_draft_with_fallback(text, reference_time, current_draft)
+        payload = {
+            "reference_time": reference_time.isoformat(),
+            "current_draft": base_draft.model_dump(mode="json"),
+            "latest_user_message": text,
+            "heuristic_fallback": fallback.model_dump(mode="json"),
+            "allowed_storage_strategies": ["local_only", "sync_to_cloud", "sync_to_cloud_and_knowledge"],
+        }
         system_prompt = (
-            "You are a schedule parsing agent for a Chinese schedule app. "
-            "Update the existing schedule draft using the latest user message. "
-            "Return JSON only with keys: title,start_time,end_time,location,remark,storage_strategy. "
-            "Interpret Chinese relative time from reference_time. "
-            "Do not invent a precise end_time if the user did not give one."
-        )
-        user_prompt = json.dumps(
-            {
-                "reference_time": reference_time.isoformat(),
-                "current_draft": base_draft.model_dump(mode="json"),
-                "latest_user_message": text,
-            },
-            ensure_ascii=False,
+            "You are the scheduling AI service for a Chinese-first calendar product. "
+            "Update the current schedule draft using the latest user message. "
+            "Return structured JSON only. "
+            "Interpret relative time using reference_time. "
+            "Preserve confirmed draft information when the latest message does not replace it. "
+            "Do not fabricate a precise end_time if the user did not provide one."
         )
         try:
-            raw = provider.create_chat_completion(
-                [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+            parsed = await runtime.ainvoke_structured_output(
+                system_prompt=system_prompt,
+                human_payload=payload,
+                output_model=ParseLLMOutput,
                 temperature=0,
             )
-        except LlmProviderError:
+        except AiRuntimeError:
             return fallback
-
-        parsed = _extract_json_object(raw)
-        if parsed is None:
-            return fallback
-
-        title = str(parsed.get("title")).strip() if parsed.get("title") else fallback.title
-        location = str(parsed.get("location")).strip() if parsed.get("location") else fallback.location
-        remark = str(parsed.get("remark")).strip() if parsed.get("remark") else fallback.remark
-        storage_strategy = parsed.get("storage_strategy")
+        title = parsed.title.strip() if parsed.title else fallback.title
+        location = parsed.location.strip() if parsed.location else fallback.location
+        remark = parsed.remark.strip() if parsed.remark else fallback.remark
+        storage_strategy = parsed.storage_strategy
         if storage_strategy not in {"local_only", "sync_to_cloud", "sync_to_cloud_and_knowledge", None}:
             storage_strategy = base_draft.storage_strategy
 
-        start_time = _parse_iso_datetime(parsed.get("start_time")) if parsed.get("start_time") else fallback.start_time
-        end_time = _parse_iso_datetime(parsed.get("end_time")) if parsed.get("end_time") else fallback.end_time
+        start_time = _parse_iso_datetime(parsed.start_time) if parsed.start_time else fallback.start_time
+        end_time = _parse_iso_datetime(parsed.end_time) if parsed.end_time else fallback.end_time
         if start_time and end_time and end_time < start_time:
             end_time = None
 
@@ -479,14 +573,18 @@ class ParseService:
         )
 
     @staticmethod
-    def _build_draft_with_fallback(text: str, reference_time: datetime) -> ScheduleDraft:
-        return _build_fallback_draft(text, reference_time)
+    def _build_draft_with_fallback(
+        text: str,
+        reference_time: datetime,
+        current_draft: ScheduleDraft | None = None,
+    ) -> ScheduleDraft:
+        return _build_fallback_draft(text, reference_time, current_draft)
 
     @staticmethod
-    def build_schedule_draft(payload: ParseDraftRequest, user_id: int) -> ParseDraftResponse:
+    async def build_schedule_draft(payload: ParseDraftRequest, user_id: int) -> ParseDraftResponse:
         _ = user_id
         reference_time = _resolve_reference_time(payload.reference_time)
-        draft = ParseService._build_draft_with_provider(payload.text.strip(), reference_time, None)
+        draft = await ParseService._build_draft_with_langchain(payload.text.strip(), reference_time, None)
         missing_fields = _build_missing_fields(draft)
         follow_up_questions = _build_follow_up_questions(missing_fields)
         return ParseDraftResponse(
@@ -548,9 +646,9 @@ class ParseService:
         session.draft.remark = _compose_session_remark(ParseService._user_messages(session))
 
     @staticmethod
-    def _apply_message_turn(session: ParseSessionState, latest_message: str, reference_time: datetime) -> None:
+    async def _apply_message_turn(session: ParseSessionState, latest_message: str, reference_time: datetime) -> None:
         current_draft = session.draft.model_copy(deep=True)
-        parsed = ParseService._build_draft_with_provider(latest_message, reference_time, current_draft)
+        parsed = await ParseService._build_draft_with_langchain(latest_message, reference_time, current_draft)
         merged = _merge_draft(current_draft, parsed, latest_message)
 
         if _message_clears_end_time(latest_message):
@@ -577,11 +675,11 @@ class ParseService:
             ParseService._append_tool_call(session, "ask_follow_up", "当前草稿仍有缺失字段，继续发起澄清。")
 
     @staticmethod
-    def create_session(payload: ParseSessionCreateRequest, user_id: int) -> ParseSessionResponse:
+    async def create_session(payload: ParseSessionCreateRequest, user_id: int) -> ParseSessionResponse:
         reference_time = _resolve_reference_time(payload.reference_time)
         session = ParseService._new_session(user_id)
         ParseService._append_message(session, "user", payload.message.strip())
-        ParseService._apply_message_turn(session, payload.message.strip(), reference_time)
+        await ParseService._apply_message_turn(session, payload.message.strip(), reference_time)
         with ParseService._lock:
             ParseService._sessions[session.session_id] = session
         return ParseService._build_session_response(session)
@@ -595,15 +693,23 @@ class ParseService:
         return session
 
     @staticmethod
-    def append_session_message(session_id: str, payload: ParseSessionMessageRequest, user_id: int) -> ParseSessionResponse:
+    async def append_session_message(
+        session_id: str,
+        payload: ParseSessionMessageRequest,
+        user_id: int,
+    ) -> ParseSessionResponse:
         reference_time = _resolve_reference_time(payload.reference_time)
         session = ParseService._require_session(session_id, user_id)
         ParseService._append_message(session, "user", payload.message.strip())
-        ParseService._apply_message_turn(session, payload.message.strip(), reference_time)
+        await ParseService._apply_message_turn(session, payload.message.strip(), reference_time)
         return ParseService._build_session_response(session)
 
     @staticmethod
-    def patch_session_draft(session_id: str, payload: ParseSessionDraftPatchRequest, user_id: int) -> ParseSessionResponse:
+    async def patch_session_draft(
+        session_id: str,
+        payload: ParseSessionDraftPatchRequest,
+        user_id: int,
+    ) -> ParseSessionResponse:
         session = ParseService._require_session(session_id, user_id)
         patch = payload.draft.model_dump(exclude_unset=True)
 

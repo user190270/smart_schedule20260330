@@ -4,10 +4,8 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user_id
-from app.core.database import get_db
+from app.core.auth import get_current_user_id_ai_safe
 from app.schemas import (
     RagChunkBuildAllResponse,
     RagChunkBuildRequest,
@@ -22,15 +20,13 @@ router = APIRouter(prefix="/rag", tags=["rag"])
 
 
 @router.post("/chunks/rebuild/{schedule_id}", response_model=RagChunkBuildResponse, status_code=status.HTTP_200_OK)
-def rebuild_schedule_chunks(
+async def rebuild_schedule_chunks(
     schedule_id: int,
     payload: RagChunkBuildRequest,
-    db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> RagChunkBuildResponse:
     try:
-        result = RagService.rebuild_chunks_for_schedule(
-            db=db,
+        result = await RagService.rebuild_chunks_for_schedule(
             user_id=user_id,
             schedule_id=schedule_id,
             chunk_size=payload.chunk_size,
@@ -43,14 +39,12 @@ def rebuild_schedule_chunks(
 
 
 @router.post("/chunks/rebuild-all", response_model=RagChunkBuildAllResponse, status_code=status.HTTP_200_OK)
-def rebuild_all_chunks(
+async def rebuild_all_chunks(
     payload: RagChunkBuildRequest,
-    db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> RagChunkBuildAllResponse:
     try:
-        return RagService.rebuild_chunks_for_user(
-            db=db,
+        return await RagService.rebuild_chunks_for_user(
             user_id=user_id,
             chunk_size=payload.chunk_size,
         )
@@ -59,14 +53,12 @@ def rebuild_all_chunks(
 
 
 @router.post("/retrieve", response_model=RagRetrieveResponse, status_code=status.HTTP_200_OK)
-def retrieve_chunks(
+async def retrieve_chunks(
     payload: RagRetrieveRequest,
-    db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> RagRetrieveResponse:
     try:
-        return RagService.retrieve_chunks(
-            db=db,
+        return await RagService.retrieve_chunks(
             user_id=user_id,
             query=payload.query,
             top_k=payload.top_k,
@@ -76,35 +68,26 @@ def retrieve_chunks(
 
 
 def _sse_event(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.post("/answer/stream", status_code=status.HTTP_200_OK)
-def stream_answer(
+async def stream_answer(
     payload: RagStreamAnswerRequest,
-    db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> StreamingResponse:
     try:
-        retrieved = RagService.retrieve_chunks(
-            db=db,
+        prepared = await RagService.prepare_stream_answer(
             user_id=user_id,
             query=payload.query,
             top_k=payload.top_k,
-        )
-        answer_text = RagService.build_answer_text(payload.query, retrieved)
-        RagService.save_chat_turn(
-            db=db,
-            user_id=user_id,
-            user_query=payload.query,
-            assistant_answer=answer_text,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     def event_iterator():
-        yield _sse_event("meta", {"retrieved_chunks": len(retrieved.results)})
-        for token in answer_text.split(" "):
+        yield _sse_event("meta", {"retrieved_chunks": len(prepared.retrieved.results)})
+        for token in prepared.answer_text.split():
             yield _sse_event("token", {"text": token})
         yield _sse_event("done", {"message": "stream_completed"})
 

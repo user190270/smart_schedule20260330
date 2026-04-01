@@ -2,9 +2,7 @@
   <div class="parse-container">
     <section class="hero-block">
       <h2 class="view-title">智能解析</h2>
-      <p class="view-subtitle">
-        先像聊天一样描述你的安排，Agent 会持续维护同一张日程草稿；当信息足够时，你再确认保存到本地仓，并按策略进入后续同步或知识库链路。
-      </p>
+      <p class="view-subtitle">用自然语言描述你的安排</p>
     </section>
 
     <section class="panel chat-panel">
@@ -72,7 +70,7 @@
           class="composer-field"
         />
         <div class="composer-footer">
-          <span class="reference-time">每轮都会显式传递参考时间：{{ referenceTimeLabel }}</span>
+          <span class="reference-time">参考时间：{{ referenceTimeLabel }}</span>
           <van-button type="primary" round icon="chat-o" :loading="loading" @click="submitMessage">
             智能解析
           </van-button>
@@ -176,9 +174,7 @@
         </div>
 
         <div class="persist-panel">
-          <p class="persist-hint">
-            Agent 只会把它维护成草稿。你点击确认后，系统才会调用 `save_schedule_to_local` 把它写入本地仓；如果你选择云端策略，再通过现有 Push / Rebuild 链路进入云端和知识库。
-          </p>
+
           <van-button
             type="primary"
             round

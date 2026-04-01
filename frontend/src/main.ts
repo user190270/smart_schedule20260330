@@ -3,6 +3,8 @@ import {
   Button,
   Cell,
   CellGroup,
+  Collapse,
+  CollapseItem,
   ConfigProvider,
   Dialog,
   Divider,
@@ -37,6 +39,8 @@ app.use(NavBar);
 app.use(Button);
 app.use(CellGroup);
 app.use(Cell);
+app.use(Collapse);
+app.use(CollapseItem);
 app.use(Tabbar);
 app.use(TabbarItem);
 app.use(Tag);

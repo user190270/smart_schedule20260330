@@ -15,26 +15,7 @@
       </div>
     </div>
 
-    <section class="panel guidance-panel">
-      <div class="panel-header">
-        <van-icon name="info-o" />
-        <h3 class="panel-title">本地优先工作流</h3>
-      </div>
-      <p class="guidance-text">
-        这里始终显示本地仓中的日程。登录后，Push 会把本地改动提交到云端，Pull 会把云端最新状态合并进本地仓，
-        Rebuild Knowledge Base 会基于允许纳入知识库的云端日程重建索引。
-      </p>
-      <div class="summary-row">
-        <span class="summary-pill">本地存储：{{ storageLabel }}</span>
-        <span class="summary-pill">待上传新增：{{ localScheduleStore.pendingCreateCount }}</span>
-        <span class="summary-pill">待上传更新：{{ localScheduleStore.pendingUpdateCount }}</span>
-        <span class="summary-pill">待删除云端：{{ localScheduleStore.pendingDeleteCloudCount }}</span>
-        <span class="summary-pill">同步冲突：{{ localScheduleStore.conflictCount }}</span>
-      </div>
-      <p v-if="authStore.isAuthenticated && localScheduleStore.hiddenOtherAccountCount > 0" class="ownership-note">
-        已为当前账号隐藏 {{ localScheduleStore.hiddenOtherAccountCount }} 条其他账号绑定的本地记录，避免把旧账号的云端状态误显示给当前账号。
-      </p>
-    </section>
+
 
     <section class="panel filter-panel">
       <van-tabs v-model:active="activeFilter" shrink animated>
@@ -42,13 +23,8 @@
         <van-tab title="本地" name="local" />
         <van-tab title="云端" name="cloud" />
       </van-tabs>
-      <p class="filter-hint">
-        <template v-if="authStore.isAuthenticated">
-          Pull 只会把云端状态合并进本地仓，不会直接替换你的本地记录。删除云端也会先进入“待删除云端”，等你下一次 Push 时再真正执行。
-        </template>
-        <template v-else>
-          未登录时你仍然可以完成本地 CRUD，只是无法执行 Push、Pull、分享和知识库重建。
-        </template>
+      <p v-if="authStore.isAuthenticated && localScheduleStore.hiddenOtherAccountCount > 0" class="ownership-note">
+        已隐藏 {{ localScheduleStore.hiddenOtherAccountCount }} 条其他账号的本地记录
       </p>
     </section>
 
@@ -118,9 +94,7 @@
       <div class="editor-content">
         <div class="editor-header">
           <h3 class="editor-title">{{ editingLocalId ? "编辑日程" : "新建日程" }}</h3>
-          <p class="editor-subtitle">
-            新建或编辑时先写入本地仓，再根据你选择的存储策略决定后续是否需要 Push 到云端，以及是否允许进入知识库。
-          </p>
+
         </div>
 
         <van-form @submit="submitForm" class="custom-form">
@@ -584,6 +558,14 @@ function formatError(error: unknown, fallback: string): string {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
+}
+
+@media (min-width: 1024px) {
+  .schedule-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: var(--spacing-lg);
+  }
 }
 
 .schedule-card {

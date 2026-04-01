@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +13,9 @@ from tests.db_helpers import reset_database
 class ParseContractTestCase(unittest.TestCase):
     def setUp(self) -> None:
         reset_database()
+        runtime_patcher = patch("app.services.parse_service.ParseService._get_runtime", return_value=None)
+        runtime_patcher.start()
+        self.addCleanup(runtime_patcher.stop)
         self.client = TestClient(app)
         self.user_id, self.headers = register_user(self.client, "parse_user_a")
 

@@ -1,102 +1,81 @@
-# API Contract (R13 Active)
+# API Contract (R17 Active)
 
 ## Scope
 
-- This file is the active boundary for the parse-agent refactor round.
-- Existing local-first schedules, Push / Pull, knowledge-base rebuild, RAG, auth, and sharing flows remain in force.
-- This round changes the parse workflow from a one-shot extraction model to a stateful agent model.
+- This file is the active boundary for the AI service-layer refactor round.
+- Existing local-first schedules, Push / Pull, sharing, auth, and admin flows remain in force.
+- This round mainly changes internal orchestration and async behavior of AI routes while preserving user-facing contracts unless a minimal, explicitly documented enhancement is required.
 
-## Current Gap To Close
+## Parse Contract To Preserve
 
-- The current frontend Parse page looks conversational but still works by replaying the transcript into `POST /api/parse/schedule-draft`.
-- The current backend stream endpoint is an SSE wrapper around the same one-shot draft generation.
-- That means the current system does not yet satisfy the target definition of an agent workflow.
+- `POST /api/parse/schedule-draft`
+  - returns `draft`, `missing_fields`, `follow_up_questions`, `requires_human_review`, and `can_persist_directly`
+- `POST /api/parse/schedule-draft/stream`
+  - keeps SSE event flow with `draft`, optional `follow_up`, and terminal `done`
+- `POST /api/parse/sessions`
+- `POST /api/parse/sessions/{session_id}/messages`
+- `PATCH /api/parse/sessions/{session_id}/draft`
+  - keeps `parse_session_id`, `messages`, `draft`, `missing_fields`, `follow_up_questions`, `ready_for_confirm`, `next_action`, `tool_calls`, `latest_assistant_message`, and `draft_visible`
 
-## Parse Agent Session Contract
+Mandatory Parse guarantees:
 
-- Parse must become session-based.
-- Minimum state carried across turns:
-  - `parse_session_id`
-  - ordered `messages`
-  - `draft`
-  - `missing_fields`
-  - `ready_for_confirm`
-  - `next_action`
-  - action/tool trace sufficient to explain draft progression
-- The session state must survive across multiple turns in a way that is not equivalent to client-side transcript replay alone.
+- Parse remains draft-first and does not persist schedules directly.
+- AI parsed schedules still require explicit user confirmation before storage.
+- Multi-turn clarification, draft updates, and `ready_for_confirm` semantics remain intact.
+- Internal implementation may become async, but external payload shapes must remain compatible with the current frontend unless a minimal enhancement is explicitly planned.
 
-## Draft Shape Contract
+## RAG Contract To Preserve
 
-- Minimum draft fields:
-  - `title`
-  - `start_time`
-  - `end_time`
-  - `location`
-  - `remark`
-  - `source`
-  - `storage_strategy`
-- `end_time` is nullable across parse, confirmation, and persistence.
-- Time values must remain compatible with the existing schedule/local-store pipeline.
+- `POST /api/rag/chunks/rebuild/{schedule_id}`
+- `POST /api/rag/chunks/rebuild-all`
+- `POST /api/rag/retrieve`
+- `POST /api/rag/answer/stream`
+  - keeps SSE event names `meta`, `token`, and `done`
+  - keeps the current frontend / mobile consumer contract usable without a breaking rewrite
 
-## Action / Tool Contract
+Mandatory RAG guarantees:
 
-- The parse workflow must expose explicit action semantics, not only raw chat text.
-- Minimum agent actions/tools for this round:
-  - `update_draft`
-  - `ask_follow_up`
-  - `finalize_draft`
-  - `save_schedule_to_local`
-- Optional later actions may include:
-  - `choose_storage_strategy`
-  - `schedule_push_hint`
-- User confirmation is required before `save_schedule_to_local`.
+- Retrieval remains user-scoped.
+- PostgreSQL + pgvector retrieval remains the underlying retrieval basis.
+- Chat history still persists after a successful answer path.
+- `/api/rag/answer/stream` must keep its existing SSE event semantics and remain consumable by the current frontend streaming client.
+- Internal answer generation must move to real LangChain orchestration rather than a direct handwritten provider call.
 
-## Frontend Parse Contract
+## Async AI Boundary Contract
 
-- Parse page exposes one primary user-facing action: `智能解析`.
-- Frontend must send `reference_time` on every start / continue turn.
-- Frontend must render:
-  - conversation history
-  - draft readiness state
-  - missing fields
-  - editable draft card when the session has enough structure
-- User manual edits must take precedence over later agent updates unless the user changes the field again.
+- Ordinary CRUD routes may remain synchronous in this round.
+- AI routes and AI services may adopt a different internal execution style if that is what is required to avoid long external waits holding DB resources.
+- Target AI path split:
+  1. short DB read session for required state or retrieval inputs
+  2. no DB session held while awaiting external model or embedding work
+  3. short DB write session for durable state updates such as vector chunks or chat history
+- AI routes must not keep dependency-injected long-lived request DB sessions alive while awaiting external model or embedding work; if needed, services should own short read / write sessions instead.
+- Simply changing route signatures to `async def` is not sufficient; provider and service layers must participate in a real await chain.
 
-## Backend Parse Contract
+## LangChain Integration Contract
 
-- The round target assumes explicit backend participation in parse session state rather than pure frontend-only orchestration.
-- Backend parse handling must therefore be able to:
-  - create a new parse session
-  - accept follow-up turns for an existing session
-  - return the updated draft/session state
-  - finalize a draft once ready
-- Route names may be additive or may replace the old one-shot shape during execution, but the resulting contract must express session state explicitly.
-
-## Persistence Contract
-
-- AI output is always draft state first, never an immediate persisted schedule.
-- After user confirmation, the save tool must create a local schedule record first.
-- The selected storage strategy must then continue through the existing semantics:
-  - `local_only`
-  - `sync_to_cloud`
-  - `sync_to_cloud_and_knowledge`
-- Parse refactor must not bypass or replace the local-first repository.
-
-## Time Semantics Contract
-
-- `reference_time` is a required product input for all parse turns.
-- Relative Chinese time expressions must be interpreted from `reference_time` and timezone context.
-- Draft confirmation state must show full year-month-day hour-minute formatting.
-- Missing `end_time` must display as `未设置结束时间` or an equivalent explicit empty-state label.
-- The system must not auto-fill `23:59:59` or another fake precise end time without user confirmation.
+- Required real usage target:
+  - Parse chain: prompt + structured output / runnable flow for extraction and draft update
+  - RAG answer chain: context assembly + prompt + model interaction through LangChain objects
+- LangChain does not need to replace pgvector SQL retrieval.
+- Embedding calls may use a LangChain embeddings wrapper or a shared async provider abstraction, but Parse and RAG both must execute a real core chain through LangChain by round close.
 
 ## Verification Contract
 
-- Required round-close browser acceptance:
-  1. start one parse session with `明早8点到9点在三饭吃饭`
-  2. verify a reasonable draft is formed and can be saved
-  3. start another parse session with `明天到 A-201 开会`
-  4. verify follow-up behavior for missing fields and allow nullable `end_time`
-  5. continue the same session with another user reply and confirm the draft advances instead of resetting
-  6. manually edit the draft card and confirm manual overrides are preserved
-  7. save through each storage strategy path and confirm the existing local-first downstream behavior still works
+Required round-close acceptance:
+
+1. Parse multi-turn clarification still works.
+2. Parse draft confirmation remains the only path to local persistence for AI parsed schedules.
+3. Knowledge-base rebuild and retrieval still work with user isolation intact.
+4. RAG answer streaming still produces `meta`, `token`, and `done` events with the current SSE semantics consumable by the current frontend.
+5. Parse and RAG LangChain-backed code paths are both exercised in tests or targeted smoke verification.
+6. AI async paths no longer rely on long-lived dependency-injected DB sessions during external waits.
+7. Frontend build passes and ordinary CRUD / sync / share / admin regressions remain green.
+
+## Terminal Verification Snapshot
+
+- This round closed on local-only verification rather than GitHub or cloud deployment.
+- Backend verification passed locally with `pytest server/tests -q` against the local PostgreSQL port mapping.
+- The backend regression suite still covers auth, CRUD, sync, share, admin, Parse, RAG, and smoke scenarios after the AI-layer refactor.
+- Frontend production build passed locally with `docker compose exec frontend npm run build`.
+- Host-shell `npm run build` was blocked by a local sandbox path-resolution issue on `C:\Users\nor`; the local containerized frontend build is the accepted round-close build artifact for this round.
