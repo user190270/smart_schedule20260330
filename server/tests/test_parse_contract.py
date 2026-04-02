@@ -194,6 +194,129 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertEqual(body["draft"]["storage_strategy"], "sync_to_cloud_and_knowledge")
         self.assertEqual(body["next_action"], "finalize_draft")
 
+    def test_parse_session_keeps_prior_time_when_only_location_changes(self) -> None:
+        create_response = self.client.post(
+            "/api/parse/sessions",
+            json={
+                "message": "明天上午10点到11点在A-201开会",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(create_response.status_code, 200)
+        session_id = create_response.json()["parse_session_id"]
+
+        continue_response = self.client.post(
+            f"/api/parse/sessions/{session_id}/messages",
+            json={
+                "message": "把第一次说的时间保留，只改地点到B-301",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(continue_response.status_code, 200)
+
+        body = continue_response.json()
+        self.assertEqual(body["draft"]["title"], "开会")
+        self.assertEqual(body["draft"]["location"], "B-301")
+        self.assertEqual(body["draft"]["start_time"], "2026-03-28T10:00:00+08:00")
+        self.assertEqual(body["draft"]["end_time"], "2026-03-28T11:00:00+08:00")
+
+    def test_parse_session_clear_end_time_only_preserves_other_fields(self) -> None:
+        create_response = self.client.post(
+            "/api/parse/sessions",
+            json={
+                "message": "明天下午3点到4点在A-201开会",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(create_response.status_code, 200)
+        session_id = create_response.json()["parse_session_id"]
+
+        continue_response = self.client.post(
+            f"/api/parse/sessions/{session_id}/messages",
+            json={
+                "message": "前面那个安排不要结束时间了",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(continue_response.status_code, 200)
+
+        body = continue_response.json()
+        self.assertEqual(body["draft"]["title"], "开会")
+        self.assertEqual(body["draft"]["location"], "A-201")
+        self.assertEqual(body["draft"]["start_time"], "2026-03-28T15:00:00+08:00")
+        self.assertIsNone(body["draft"]["end_time"])
+        self.assertTrue(body["ready_for_confirm"])
+
+    def test_parse_session_replaces_time_and_keeps_existing_title_and_location(self) -> None:
+        create_response = self.client.post(
+            "/api/parse/sessions",
+            json={
+                "message": "明天上午10点到11点在A-201开会",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(create_response.status_code, 200)
+        session_id = create_response.json()["parse_session_id"]
+
+        continue_response = self.client.post(
+            f"/api/parse/sessions/{session_id}/messages",
+            json={
+                "message": "还是上次那个会议，只改成明天下午3点到4点",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(continue_response.status_code, 200)
+
+        body = continue_response.json()
+        self.assertEqual(body["draft"]["title"], "开会")
+        self.assertEqual(body["draft"]["location"], "A-201")
+        self.assertEqual(body["draft"]["start_time"], "2026-03-28T15:00:00+08:00")
+        self.assertEqual(body["draft"]["end_time"], "2026-03-28T16:00:00+08:00")
+
+    def test_parse_session_can_keep_referenced_location_while_overriding_title(self) -> None:
+        first_response = self.client.post(
+            "/api/parse/sessions",
+            json={
+                "message": "明天下午3点到4点在A楼开会",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(first_response.status_code, 200)
+        session_id = first_response.json()["parse_session_id"]
+
+        second_response = self.client.post(
+            f"/api/parse/sessions/{session_id}/messages",
+            json={
+                "message": "地点改到B楼",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(second_response.status_code, 200)
+
+        third_response = self.client.post(
+            f"/api/parse/sessions/{session_id}/messages",
+            json={
+                "message": "第二条说的地点保留，标题改成组会",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(third_response.status_code, 200)
+
+        body = third_response.json()
+        self.assertEqual(body["draft"]["title"], "组会")
+        self.assertEqual(body["draft"]["location"], "B楼")
+        self.assertEqual(body["draft"]["start_time"], "2026-03-28T15:00:00+08:00")
+        self.assertEqual(body["draft"]["end_time"], "2026-03-28T16:00:00+08:00")
+
 
 if __name__ == "__main__":
     unittest.main()

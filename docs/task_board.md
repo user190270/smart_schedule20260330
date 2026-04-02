@@ -1,4 +1,4 @@
-# Progress Tracker (R17 - LangChain Integration and Async AI Service Hardening)
+# Progress Tracker (R18 - Parse Referential Context and Partial Update Hardening)
 
 ## Legend
 
@@ -9,38 +9,38 @@
 ## Round Rules
 
 - This round is TERMINAL.
-- Local implementation, local regression verification, and local frontend build are complete.
-- GitHub synchronization and cloud deployment are explicitly deferred to a later round.
+- Parse context handling and field-level merge semantics are implemented and verified.
+- No frontend contract expansion was required to close this round.
 
-- [x] `P1` Shared LangChain runtime foundation
-  - [x] `P1-S1` Add LangChain dependencies and a shared async AI runtime boundary for chat, structured parse output, embeddings, and streaming primitives.
-  - [x] `P1-S2` Align AI router / service / provider seams to the new runtime entry points so Parse and RAG both consume the same async LangChain seam.
-  - `done_when`: A reusable async LangChain runtime exists, dependency wiring is stable, and Parse / RAG can both consume the seam without holding request-scoped DB sessions during long upstream waits.
-  - `verification_plan`: Import / compile the runtime, run backend regression, and keep `docs_consistency_check` green.
+- [x] `P1` Parse context contract and merge semantics
+  - [x] `P1-S1` Define and implement the backend Parse session context package plus field-intent seam needed for keep / replace / clear / reuse behavior across turns.
+  - [x] `P1-S2` Tighten draft merge behavior so unrelated fields are preserved by default and explicit clearing instructions remove only the targeted field.
+  - `done_when`: Parse has a concrete backend context-and-merge foundation for referential follow-ups without breaking current route compatibility or one-shot behavior.
+  - `verification_plan`: targeted Parse code audit plus focused backend tests for referential keep/update and clear-field behavior.
 
-- [x] `P2` Parse LangChain refactor
-  - [x] `P2-S1` Refactor Parse draft generation and session turn updates to a real LangChain chain with structured output and async provider calls while preserving follow-up, draft merge, and `ready_for_confirm` semantics.
-  - [x] `P2-S2` Keep parse route and frontend contract compatibility while adding regression coverage that proves multi-turn updates and confirm-only persistence still hold.
-  - `done_when`: Parse routes truly execute LangChain-backed orchestration without regressing the sessioned agent workflow.
-  - `verification_plan`: `pytest server/tests/test_parse_contract.py -q` plus full backend regression.
+- [x] `P2` Parse referential backend execution
+  - [x] `P2-S1` Refine the LangChain/fallback Parse path so it can use structured prior-turn context, relevant earlier references, and current draft state together instead of relying mostly on the latest message.
+  - [x] `P2-S2` Preserve `missing_fields`, `follow_up_questions`, and `ready_for_confirm` behavior while preventing partial updates from clobbering unrelated draft fields.
+  - `done_when`: Parse follow-up instructions like keeping prior time, changing only location, reusing an earlier place, or clearing end time work more reliably in backend behavior.
+  - `verification_plan`: backend Parse step tests plus a code audit of the session context and field-intent path.
 
-- [x] `P3` RAG LangChain refactor
-  - [x] `P3-S1` Preserve pgvector retrieval but refactor retrieval + answer orchestration to async LangChain components with a reusable context-assembly boundary.
-  - [x] `P3-S2` Preserve `/api/rag/answer/stream` event names, SSE event semantics, and current frontend consumption behavior while ensuring chat-history writes happen through a short write session after AI output is available.
-  - `done_when`: RAG retrieval and streamed answer generation use real LangChain orchestration without breaking the existing frontend / mobile SSE consumer or its current event handling assumptions.
-  - `verification_plan`: `pytest server/tests/test_rag_workflow.py -q` plus full backend regression.
+- [x] `P3` Backend regression coverage
+  - [x] `P3-S1` Add representative Parse tests for referential reuse, partial replacement, keep-prior-field, and explicit clear behavior.
+  - [x] `P3-S2` Keep or extend existing simple session and one-shot tests so regressions are caught early.
+  - `done_when`: the backend suite proves the new referential behavior while retaining existing simple Parse semantics.
+  - `verification_plan`: `pytest server/tests/test_parse_contract.py -q` and any new targeted Parse test module if added.
 
-- [x] `P4` Async AI path hardening
-  - [x] `P4-S1` Shorten DB session hold times in rebuild / retrieve / answer flows by splitting read -> external await -> write phases with explicit session boundaries.
-  - [x] `P4-S2` Add timeout, error-wrapping, and logging hardening so AI failures are isolated from CRUD / sync / admin paths.
-  - `done_when`: AI long waits no longer share the same long-held request DB session pattern, and error handling remains robust.
-  - `verification_plan`: Code audit of AI route / service boundaries plus backend regression.
+- [x] `P4` Minimal contract or UI alignment if needed
+  - [x] `P4-S1` Confirm that no schema, route, or Parse page/client adjustment is required because the backend improvement remains contract-compatible.
+  - [x] `P4-S2` Keep the existing Parse page flow unchanged while validating that its current chat-plus-draft pattern remains usable.
+  - `done_when`: any required frontend or contract adjustment remains additive, minimal, and compatible with the existing Parse page flow.
+  - `verification_plan`: targeted frontend/client sanity check only if this phase is entered.
 
-- [x] `P5` Verification and acceptance
-  - [x] `P5-S1` Run backend regression for Parse, RAG, auth, CRUD, sync, sharing, admin, and schedule confirmation semantics.
-  - [x] `P5-S2` Run the frontend production build locally without cloud integration.
-  - `done_when`: Parse and RAG both run through real LangChain-backed core chains, backend regression passes, and the frontend build succeeds locally.
-  - `verification_plan`: `pytest server/tests -q` and `docker compose exec frontend npm run build`.
+- [x] `P5` Verification and round acceptance
+  - [x] `P5-S1` Run focused Parse backend regression for simple parse, session follow-up, referential updates, partial replacement, and clear-field cases.
+  - [x] `P5-S2` Run a local production build verification for the existing frontend surface.
+  - `done_when`: simple Parse still works, referential follow-ups are more reliable, partial updates preserve unrelated fields, clear instructions behave correctly, and confirmation flow remains intact.
+  - `verification_plan`: backend Parse tests, optional minimal Parse page check, and docs consistency confirmation.
 
 - `current_phase`: `COMPLETED`
 - `current_step`: `LOCAL BUILD VERIFIED`

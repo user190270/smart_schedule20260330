@@ -1,97 +1,95 @@
-# Working Contract (R17 - LangChain Integration and Async AI Service Hardening)
+# Working Contract (R18 - Parse Referential Context and Partial Update Hardening)
 
 ## Reading Order
 1. `docs/working_contract.md`
 2. `docs/current_state.md`
 3. `docs/task_board.md`
-4. `docs/api_contract.md` because this round touches AI, async service boundaries, and streaming contracts
-5. `docs/decision_log.md` only when the active docs do not fully explain a durable route choice
+4. `docs/api_contract.md` because this round touches Parse session semantics and preserved frontend/backend compatibility
+5. `docs/decision_log.md` only when the active docs do not fully explain a durable Parse route choice
 
 ## Round Origin
 
-- This is Round 17 (R17), opened on 2026-04-01 for the requirement `LangChain integration and AI service-layer async hardening`.
-- R16 is historical input only. Its active docs must not be reused as this round's live state.
-- Current repo has a rollback checkpoint at commit `927c089` with message `chore: checkpoint after web desktop polish`.
+- This is Round 18 (R18), opened on 2026-04-02 for the requirement `Enhance Parse multi-turn context understanding and referential update behavior`.
+- R17 is terminal historical input only. Its active docs must not be reused as this round's live state.
 - Current repo reality already includes:
-  - local-first schedules
-  - Push / Pull and sync status aggregation
-  - knowledge-base rebuild and pgvector-backed retrieval
-  - Parse agent multi-turn session flow
-  - admin Web page
+  - backend-owned Parse session state
+  - draft-first confirmation flow
+  - session follow-up questions and `ready_for_confirm`
+  - frontend Parse chat transcript plus draft confirmation card
+  - LangChain-backed Parse runtime seam from the prior round
 - The gap this round closes:
-  - `server/pyproject.toml` does not yet include LangChain dependencies
-  - Parse and RAG still rely on a synchronous custom provider path
-  - AI upstream calls do not yet form a trustworthy async, non-blocking chain
-  - the code cannot yet honestly claim that AI orchestration is LangChain-based or that long AI waits are isolated from ordinary transactional paths
+  - model-facing Parse context still centers on `latest_user_message + current_draft`
+  - session history is retained mostly for display and remark composition rather than reliable referential reasoning
+  - field merge behavior is too coarse for instructions like `keep prior time`, `only change location`, `clear end time`, or `reuse the earlier place`
 
 ## Planner / Executor / Reviewer Boundary
 
-- Planner refreshes active docs, locks the LangChain + async AI scope, and defines step-level acceptance criteria.
+- Planner refreshes active docs, locks the Parse-only scope, and defines a small-step execution order.
 - Executor implements only the active step from `docs/current_state.md`, verifies that step, then updates docs.
 - Reviewer checks the active step against `done_when` and `verification_plan`, with special focus on:
-  - real LangChain execution rather than comments or wrappers
-  - real async await paths rather than nominal `async def` wrappers around blocking work
-  - preserving Parse / RAG contract compatibility
+  - real referential multi-turn improvement rather than prompt-only wording changes
+  - field-level add / replace / keep / clear semantics
+  - preserving simple one-shot Parse behavior and confirm-only persistence
 
 ## Core Constraints
 
+- Preserve the current draft-first Parse workflow.
+- Preserve user-confirmed save behavior for AI-parsed schedules.
+- Do not turn Parse into a general chatbot.
+- Do not let AI overwrite unrelated fields during partial updates unless the latest user message clearly replaces them.
+- Referential instructions must be handled more intentionally across turns, including:
+  - reuse of earlier time or location
+  - partial replacement of one field while keeping others
+  - explicit clearing such as `不要结束时间了`
+- Prefer incremental changes in `server/app/services/parse_service.py` over a large rewrite.
+- `server/app/services/ai_runtime.py` may change only if the Parse payload seam needs a small, testable extension.
+- Preserve current Parse route compatibility and frontend Parse page behavior unless a minimal additive change is strictly required.
+- Do not regress existing Parse simple one-shot behavior.
+- Do not break existing RAG, sync, CRUD, share, or admin contracts.
 - Do not modify `prompts/`, `media/`, or `skills/`.
-- Do not regress existing Parse semantics:
-  - multi-turn session state
-  - draft update flow
-  - follow-up questions
-  - `ready_for_confirm`
-  - confirm-only persistence for AI parsed schedules
-- Parse and RAG must both land on real LangChain-backed orchestration by round close. Finishing only one of them is not sufficient for this round.
-- Do not break the current RAG retrieval contract or the `/api/rag/answer/stream` SSE event semantics / frontend consumption pattern.
-- Do not replace PostgreSQL + pgvector retrieval with a different vector-store architecture.
-- Do not rewrite the entire backend into a full async system. Ordinary CRUD / sync / share / admin paths stay on their current architecture unless a minimal compatibility adjustment is strictly required.
-- AI-path async means real awaited external model / embedding calls, not only route signatures.
-- AI routes must not keep a long-lived dependency-injected database session alive while awaiting external model work. If needed, services should use short-lived read / write sessions around the external await.
-- LangChain usage must be real code-level orchestration in Parse and/or RAG, not documentation theater.
-- New dependencies must remain reasonably scoped and compatible with the current server runtime.
 
 ## Protected Paths
 
 - `prompts/`
 - `media/`
 - `skills/`
-- Executor must not modify `docs/working_contract.md` unless a future replan explicitly requires it.
+- Large frontend redesign is prohibited in this round.
 
 ## Scope Definition
 
 ### In scope
 
-- `server/pyproject.toml` and backend AI dependency wiring
-- `server/app/services/` AI provider / orchestration / runtime modules
-- `server/app/routers/parse.py`
-- `server/app/routers/rag.py`
-- `server/app/core/database.py` or adjacent helpers when needed to shorten AI-path DB session lifetime
-- backend AI tests and active docs
+- `server/app/services/parse_service.py`
+- `server/app/services/ai_runtime.py` only if the Parse runtime seam needs a payload-shape adjustment
+- Parse-related schemas, route compatibility, and tests
+- Minimal Parse frontend/client alignment only if backend behavior requires a small additive UI or contract adjustment
 
 ### Out of scope
 
-- changing `prompts/`, `media/`, or `skills/`
-- replacing pgvector SQL retrieval
-- introducing Celery, Kafka, message queues, or background worker infrastructure
-- removing the AI draft confirmation gate
-- broad refactors of ordinary CRUD / sync / share / admin code for style alone
+- rebuilding Parse as a general-purpose chat system
+- changing RAG architecture
+- broad backend refactors outside Parse unless strictly required
+- unrelated schedule schema expansion
+- visual frontend redesign
 
 ## Verification-First Rules
 
-- Every AI step must prove both behavior and architecture:
-  - behavior: Parse session semantics and RAG SSE contract still work
-  - architecture: LangChain objects are actually executed in both Parse and RAG, async await paths are real, and DB session boundaries are shorter and clearer
-- Backend verification is mandatory for every AI step.
-- Final round-close verification must include:
-  - backend tests or targeted critical-path checks
-  - manual Parse and RAG smoke validation
-  - `npm run build` in `frontend/`
-- When a step changes router or service boundaries, document the read -> external await -> write split explicitly in docs or review evidence.
+- Backend Parse regression is mandatory for every execution step in this round.
+- This round must add or update targeted tests for representative referential scenarios, including:
+  - initial message plus time follow-up
+  - keep prior time and change only location
+  - clear end time only
+  - retain title and location while replacing time
+  - reuse of earlier context across turns
+- Final round-close evidence must show:
+  - simple one-shot Parse still works
+  - draft-first and confirm-only persistence still hold
+  - referential updates avoid clobbering unrelated fields
+- Frontend sanity check is only required if contract or UI behavior changes.
 
 ## Document Synchronization Rules
 
 - After each completed step, update `docs/current_state.md` to the next active step.
 - Keep exactly two `[>]` entries in `docs/task_board.md` during an active round: one phase and one step.
 - Record only durable cross-step decisions in `docs/decision_log.md`.
-- If implementation evidence shows the current step cannot preserve Parse / RAG compatibility within this round's constraints, route to `REPLAN` rather than silently broadening scope.
+- If implementation evidence shows the current step requires a broader contract shift than planned, route to `REPLAN` rather than silently widening scope.

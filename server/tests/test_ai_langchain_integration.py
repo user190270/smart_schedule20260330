@@ -16,7 +16,7 @@ from app.main import app
 from app.models import Schedule, VectorChunk
 from app.models.enums import ScheduleSource
 from app.services.ai_runtime import LangChainAiRuntime
-from app.services.parse_service import ParseLLMOutput
+from app.services.parse_service import ParseFieldUpdate, ParseLLMOutput
 from tests.auth_helpers import register_user
 from tests.db_helpers import reset_database
 
@@ -93,23 +93,47 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
             self.schedule_id = schedule.id
 
     def test_parse_session_uses_langchain_runtime_when_available(self) -> None:
-        runtime = type("FakeParseRuntime", (), {})()
-        runtime.ainvoke_structured_output = AsyncMock(
-            return_value=ParseLLMOutput(
-                title="Design Review",
-                start_time="2026-04-02T09:00:00+08:00",
-                end_time="2026-04-02T10:00:00+08:00",
-                location="Room A",
-                remark="Need async service review",
-                storage_strategy="sync_to_cloud",
+        captured_payloads: list[dict] = []
+
+        async def fake_invoke_structured_output(**kwargs):
+            captured_payloads.append(kwargs["human_payload"])
+            if len(captured_payloads) == 1:
+                return ParseLLMOutput(
+                    title=ParseFieldUpdate(action="set", value="Design Review"),
+                    start_time=ParseFieldUpdate(action="set", value="2026-04-02T09:00:00+08:00"),
+                    end_time=ParseFieldUpdate(action="set", value="2026-04-02T10:00:00+08:00"),
+                    location=ParseFieldUpdate(action="set", value="Room A"),
+                    remark=ParseFieldUpdate(action="set", value="Need async service review"),
+                    storage_strategy=ParseFieldUpdate(action="set", value="sync_to_cloud"),
+                )
+            return ParseLLMOutput(
+                title=ParseFieldUpdate(action="keep"),
+                start_time=ParseFieldUpdate(action="keep"),
+                end_time=ParseFieldUpdate(action="keep"),
+                location=ParseFieldUpdate(action="set", value="Room B"),
+                remark=ParseFieldUpdate(action="keep"),
+                storage_strategy=ParseFieldUpdate(action="keep"),
             )
-        )
+
+        runtime = type("FakeParseRuntime", (), {})()
+        runtime.ainvoke_structured_output = AsyncMock(side_effect=fake_invoke_structured_output)
 
         with patch("app.services.parse_service.ParseService._get_runtime", return_value=runtime):
-            response = self.client.post(
+            create_response = self.client.post(
                 "/api/parse/sessions",
                 json={
                     "message": "Tomorrow 9 to 10 design review in Room A.",
+                    "reference_time": "2026-04-01T10:00:00+08:00",
+                },
+                headers=self.headers,
+            )
+            self.assertEqual(create_response.status_code, 200)
+            session_id = create_response.json()["parse_session_id"]
+
+            response = self.client.post(
+                f"/api/parse/sessions/{session_id}/messages",
+                json={
+                    "message": "Keep the previous time and only change the location to Room B.",
                     "reference_time": "2026-04-01T10:00:00+08:00",
                 },
                 headers=self.headers,
@@ -118,7 +142,13 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["draft"]["title"], "Design Review")
-        self.assertEqual(body["draft"]["location"], "Room A")
+        self.assertEqual(body["draft"]["location"], "Room B")
+        self.assertEqual(body["draft"]["start_time"], "2026-04-02T09:00:00+08:00")
+        self.assertIsNotNone(captured_payloads[1]["session_context"])
+        self.assertEqual(
+            captured_payloads[1]["session_context"]["prior_user_turns"][0]["message"],
+            "Tomorrow 9 to 10 design review in Room A.",
+        )
         runtime.ainvoke_structured_output.assert_awaited()
 
     def test_rag_paths_use_langchain_runtime_when_available(self) -> None:

@@ -5,9 +5,10 @@ from datetime import date, datetime, time, timedelta
 import json
 import re
 from threading import Lock
+from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.enums import ScheduleSource
 from app.schemas import (
@@ -102,6 +103,7 @@ class SessionMessage:
     id: str
     role: str
     content: str
+    reference_time: datetime | None = None
 
 
 @dataclass
@@ -123,6 +125,9 @@ class ParseSessionState:
     next_action: str = "ask_follow_up"
     latest_assistant_message: str | None = None
     updated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
+
+
+SESSION_HISTORY_FIELDS = ("title", "start_time", "end_time", "location")
 
 
 def _aware_now() -> datetime:
@@ -259,6 +264,27 @@ def _extract_title(text: str, location: str | None) -> str | None:
     return cleaned[:120]
 
 
+TITLE_OVERRIDE_PATTERNS = [
+    re.compile(
+        r"(?:标题|名称|主题)\s*(?:改成|改为|换成|叫做|写成)\s*(?P<title>[A-Za-z0-9\u4e00-\u9fff#\-\(\)《》“”\"' ]{1,80})"
+    ),
+    re.compile(
+        r"(?:标题|名称|主题)\s*(?:是|为)\s*(?P<title>[A-Za-z0-9\u4e00-\u9fff#\-\(\)《》“”\"' ]{1,80})"
+    ),
+]
+
+
+def _extract_title_override(text: str) -> str | None:
+    for pattern in TITLE_OVERRIDE_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        title = match.group("title").strip(" ,，。；;!?！？\"'")
+        if title:
+            return title[:120]
+    return None
+
+
 def _has_explicit_time(text: str) -> bool:
     return bool(TIME_RANGE_PATTERN.search(text) or TIME_POINT_PATTERN.search(text) or END_ONLY_PATTERN.search(text))
 
@@ -360,61 +386,27 @@ def _message_clears_end_time(text: str) -> bool:
     return any(token in text for token in ("不设结束时间", "没有结束时间", "结束时间不填", "不用结束时间", "先不填结束时间"))
 
 
-def _looks_like_follow_up_only(text: str) -> bool:
-    stripped = text.strip()
-    if len(stripped) <= 8:
-        return True
-    if _has_explicit_time(text):
-        return True
-    return bool(_extract_location(text))
-
-
-def _build_fallback_draft(
-    text: str,
-    reference_time: datetime,
-    current_draft: ScheduleDraft | None = None,
-) -> ScheduleDraft:
-    location = _extract_location(text)
-    start_time, end_time = _extract_temporal_range(text, reference_time)
-    anchor_date = _resolve_session_anchor_date(current_draft, text, reference_time)
-    if anchor_date is not None:
-        if start_time is not None:
-            start_time = _replace_datetime_date(start_time, anchor_date)
-        if end_time is not None:
-            end_time = _replace_datetime_date(end_time, anchor_date)
-    title = _extract_title(text, location)
-    return ScheduleDraft(
-        title=title,
-        start_time=start_time,
-        end_time=end_time,
-        location=location,
-        remark=text.strip() or None,
-        source=ScheduleSource.AI_PARSED,
-    )
-
-
-def _merge_draft(base: ScheduleDraft, incoming: ScheduleDraft, latest_message: str) -> ScheduleDraft:
-    merged = base.model_copy(deep=True)
-    title_signal = not _looks_like_follow_up_only(latest_message)
-
-    if incoming.title and (not merged.title or title_signal):
-        merged.title = incoming.title
-    if incoming.start_time is not None:
-        merged.start_time = incoming.start_time
-    if incoming.end_time is not None:
-        merged.end_time = incoming.end_time
-    if incoming.location:
-        merged.location = incoming.location
-    if incoming.remark:
-        merged.remark = incoming.remark
-    return merged
-
-
 def _compose_session_remark(user_messages: list[str]) -> str | None:
     cleaned = [message.strip() for message in user_messages if message.strip()]
     if not cleaned:
         return None
     return "\n".join(cleaned)
+
+
+def _message_clears_end_time(text: str) -> bool:
+    clear_tokens = (
+        "不设结束时间",
+        "没有结束时间",
+        "结束时间不填",
+        "不用结束时间",
+        "先不填结束时间",
+        "不要结束时间了",
+        "结束时间不要了",
+        "去掉结束时间",
+        "清空结束时间",
+        "删掉结束时间",
+    )
+    return any(token in text for token in clear_tokens)
 
 
 def _build_missing_fields(draft: ScheduleDraft) -> list[str]:
@@ -494,13 +486,185 @@ def _extract_json_object(raw_text: str) -> dict | None:
         return None
 
 
+ParseFieldAction = Literal["keep", "set", "clear"]
+
+
+class ParseFieldUpdate(BaseModel):
+    action: ParseFieldAction = "keep"
+    value: str | None = None
+
+
 class ParseLLMOutput(BaseModel):
-    title: str | None = None
-    start_time: str | None = None
-    end_time: str | None = None
-    location: str | None = None
-    remark: str | None = None
-    storage_strategy: str | None = None
+    title: ParseFieldUpdate = Field(default_factory=ParseFieldUpdate)
+    start_time: ParseFieldUpdate = Field(default_factory=ParseFieldUpdate)
+    end_time: ParseFieldUpdate = Field(default_factory=ParseFieldUpdate)
+    location: ParseFieldUpdate = Field(default_factory=ParseFieldUpdate)
+    remark: ParseFieldUpdate = Field(default_factory=ParseFieldUpdate)
+    storage_strategy: ParseFieldUpdate = Field(default_factory=ParseFieldUpdate)
+
+
+def _keep_field() -> ParseFieldUpdate:
+    return ParseFieldUpdate(action="keep")
+
+
+def _set_field(value: str) -> ParseFieldUpdate:
+    return ParseFieldUpdate(action="set", value=value)
+
+
+def _clear_field() -> ParseFieldUpdate:
+    return ParseFieldUpdate(action="clear")
+
+
+def _empty_update_plan() -> ParseLLMOutput:
+    return ParseLLMOutput()
+
+
+def _build_fallback_update_plan(
+    text: str,
+    reference_time: datetime,
+    current_draft: ScheduleDraft | None = None,
+) -> ParseLLMOutput:
+    plan = _empty_update_plan()
+    location = _extract_location(text)
+    start_time, end_time = _extract_temporal_range(text, reference_time)
+    anchor_date = _resolve_session_anchor_date(current_draft, text, reference_time)
+    if anchor_date is not None:
+        if start_time is not None:
+            start_time = _replace_datetime_date(start_time, anchor_date)
+        if end_time is not None:
+            end_time = _replace_datetime_date(end_time, anchor_date)
+
+    title_override = _extract_title_override(text)
+    title_candidate = title_override or _extract_title(text, location)
+
+    if title_override:
+        plan.title = _set_field(title_override)
+    elif current_draft is None or not current_draft.title:
+        if title_candidate:
+            plan.title = _set_field(title_candidate)
+
+    if start_time is not None:
+        plan.start_time = _set_field(start_time.isoformat())
+
+    if _message_clears_end_time(text):
+        plan.end_time = _clear_field()
+    elif end_time is not None:
+        plan.end_time = _set_field(end_time.isoformat())
+    else:
+        base_start_time = start_time or (current_draft.start_time if current_draft else None)
+        follow_up_end_time = _extract_follow_up_end_time(
+            text,
+            base_start_time,
+            reference_time,
+        )
+        if follow_up_end_time is not None:
+            plan.end_time = _set_field(follow_up_end_time.isoformat())
+
+    if location is not None:
+        plan.location = _set_field(location)
+
+    if current_draft is None and text.strip():
+        plan.remark = _set_field(text.strip())
+
+    return plan
+
+
+def _normalize_string_update(update: ParseFieldUpdate | None, fallback: ParseFieldUpdate) -> ParseFieldUpdate:
+    candidate = update or fallback
+    if candidate.action == "set" and candidate.value:
+        value = candidate.value.strip()
+        if value:
+            return ParseFieldUpdate(action="set", value=value)
+        return fallback
+    if candidate.action in {"keep", "clear"}:
+        return candidate
+    return fallback
+
+
+def _normalize_datetime_update(update: ParseFieldUpdate | None, fallback: ParseFieldUpdate) -> ParseFieldUpdate:
+    candidate = update or fallback
+    if candidate.action == "set":
+        if _parse_iso_datetime(candidate.value):
+            return candidate
+        return fallback
+    if candidate.action in {"keep", "clear"}:
+        return candidate
+    return fallback
+
+
+def _normalize_storage_update(update: ParseFieldUpdate | None, fallback: ParseFieldUpdate) -> ParseFieldUpdate:
+    candidate = update or fallback
+    if candidate.action == "set" and candidate.value in {"local_only", "sync_to_cloud", "sync_to_cloud_and_knowledge"}:
+        return candidate
+    if candidate.action in {"keep", "clear"}:
+        return candidate
+    return fallback
+
+
+def _combine_runtime_and_fallback_plan(parsed: ParseLLMOutput, fallback: ParseLLMOutput) -> ParseLLMOutput:
+    field_names = ("title", "start_time", "end_time", "location", "remark", "storage_strategy")
+    combined = _empty_update_plan()
+
+    for field_name in field_names:
+        parsed_update = getattr(parsed, field_name) if field_name in parsed.model_fields_set else None
+        fallback_update = getattr(fallback, field_name)
+        if field_name in {"start_time", "end_time"}:
+            normalized = _normalize_datetime_update(parsed_update, fallback_update)
+        elif field_name == "storage_strategy":
+            normalized = _normalize_storage_update(parsed_update, fallback_update)
+        else:
+            normalized = _normalize_string_update(parsed_update, fallback_update)
+        setattr(combined, field_name, normalized)
+
+    return combined
+
+
+def _apply_update_plan(base: ScheduleDraft, plan: ParseLLMOutput) -> ScheduleDraft:
+    merged = base.model_copy(deep=True)
+
+    if plan.title.action == "clear":
+        merged.title = None
+    elif plan.title.action == "set" and plan.title.value:
+        merged.title = plan.title.value.strip()
+
+    if plan.start_time.action == "clear":
+        merged.start_time = None
+    elif plan.start_time.action == "set":
+        parsed_start = _parse_iso_datetime(plan.start_time.value)
+        if parsed_start is not None:
+            merged.start_time = parsed_start
+
+    if plan.end_time.action == "clear":
+        merged.end_time = None
+    elif plan.end_time.action == "set":
+        parsed_end = _parse_iso_datetime(plan.end_time.value)
+        if parsed_end is not None:
+            merged.end_time = parsed_end
+
+    if plan.location.action == "clear":
+        merged.location = None
+    elif plan.location.action == "set" and plan.location.value:
+        merged.location = plan.location.value.strip()
+
+    if plan.remark.action == "clear":
+        merged.remark = None
+    elif plan.remark.action == "set" and plan.remark.value:
+        merged.remark = plan.remark.value.strip()
+
+    if plan.storage_strategy.action == "clear":
+        merged.storage_strategy = None
+    elif plan.storage_strategy.action == "set" and plan.storage_strategy.value in {
+        "local_only",
+        "sync_to_cloud",
+        "sync_to_cloud_and_knowledge",
+    }:
+        merged.storage_strategy = plan.storage_strategy.value
+
+    if merged.start_time and merged.end_time and merged.end_time < merged.start_time:
+        merged.end_time = None
+
+    merged.source = ScheduleSource.AI_PARSED
+    return merged
 
 
 class ParseService:
@@ -519,26 +683,35 @@ class ParseService:
         text: str,
         reference_time: datetime,
         current_draft: ScheduleDraft | None,
+        session_context: dict[str, object] | None = None,
     ) -> ScheduleDraft:
         runtime = ParseService._get_runtime()
-        if runtime is None:
-            return ParseService._build_draft_with_fallback(text, reference_time, current_draft)
-
         base_draft = current_draft or ScheduleDraft(source=ScheduleSource.AI_PARSED)
-        fallback = ParseService._build_draft_with_fallback(text, reference_time, current_draft)
+        fallback_plan = _build_fallback_update_plan(text, reference_time, current_draft)
+        fallback_preview = _apply_update_plan(base_draft, fallback_plan)
+        if runtime is None:
+            return fallback_preview
+
         payload = {
             "reference_time": reference_time.isoformat(),
             "current_draft": base_draft.model_dump(mode="json"),
             "latest_user_message": text,
-            "heuristic_fallback": fallback.model_dump(mode="json"),
+            "session_context": session_context,
+            "heuristic_update_plan": fallback_plan.model_dump(mode="json"),
+            "heuristic_fallback_preview": fallback_preview.model_dump(mode="json"),
             "allowed_storage_strategies": ["local_only", "sync_to_cloud", "sync_to_cloud_and_knowledge"],
+            "field_actions": ["keep", "set", "clear"],
         }
         system_prompt = (
             "You are the scheduling AI service for a Chinese-first calendar product. "
-            "Update the current schedule draft using the latest user message. "
+            "Update the current schedule draft using the latest user message and any provided session_context. "
             "Return structured JSON only. "
             "Interpret relative time using reference_time. "
-            "Preserve confirmed draft information when the latest message does not replace it. "
+            "For each field, return action=keep, set, or clear. "
+            "Use keep when the latest message does not change that field. "
+            "Use clear only when the user explicitly removes a field. "
+            "Use prior turns to resolve references like previous, earlier, first, or second turn. "
+            "Preserve unrelated draft information unless the latest message clearly replaces it. "
             "Do not fabricate a precise end_time if the user did not provide one."
         )
         try:
@@ -549,28 +722,10 @@ class ParseService:
                 temperature=0,
             )
         except AiRuntimeError:
-            return fallback
-        title = parsed.title.strip() if parsed.title else fallback.title
-        location = parsed.location.strip() if parsed.location else fallback.location
-        remark = parsed.remark.strip() if parsed.remark else fallback.remark
-        storage_strategy = parsed.storage_strategy
-        if storage_strategy not in {"local_only", "sync_to_cloud", "sync_to_cloud_and_knowledge", None}:
-            storage_strategy = base_draft.storage_strategy
+            return fallback_preview
 
-        start_time = _parse_iso_datetime(parsed.start_time) if parsed.start_time else fallback.start_time
-        end_time = _parse_iso_datetime(parsed.end_time) if parsed.end_time else fallback.end_time
-        if start_time and end_time and end_time < start_time:
-            end_time = None
-
-        return ScheduleDraft(
-            title=title,
-            start_time=start_time,
-            end_time=end_time,
-            location=location,
-            remark=remark,
-            source=ScheduleSource.AI_PARSED,
-            storage_strategy=storage_strategy,
-        )
+        combined_plan = _combine_runtime_and_fallback_plan(parsed, fallback_plan)
+        return _apply_update_plan(base_draft, combined_plan)
 
     @staticmethod
     def _build_draft_with_fallback(
@@ -578,13 +733,14 @@ class ParseService:
         reference_time: datetime,
         current_draft: ScheduleDraft | None = None,
     ) -> ScheduleDraft:
-        return _build_fallback_draft(text, reference_time, current_draft)
+        base_draft = current_draft or ScheduleDraft(source=ScheduleSource.AI_PARSED)
+        return _apply_update_plan(base_draft, _build_fallback_update_plan(text, reference_time, current_draft))
 
     @staticmethod
     async def build_schedule_draft(payload: ParseDraftRequest, user_id: int) -> ParseDraftResponse:
         _ = user_id
         reference_time = _resolve_reference_time(payload.reference_time)
-        draft = await ParseService._build_draft_with_langchain(payload.text.strip(), reference_time, None)
+        draft = await ParseService._build_draft_with_langchain(payload.text.strip(), reference_time, None, None)
         missing_fields = _build_missing_fields(draft)
         follow_up_questions = _build_follow_up_questions(missing_fields)
         return ParseDraftResponse(
@@ -603,7 +759,10 @@ class ParseService:
     def _build_session_response(session: ParseSessionState) -> ParseSessionResponse:
         return ParseSessionResponse(
             parse_session_id=session.session_id,
-            messages=[ParseAgentMessage(**message.__dict__) for message in session.messages],
+            messages=[
+                ParseAgentMessage(id=message.id, role=message.role, content=message.content)
+                for message in session.messages
+            ],
             draft=session.draft,
             missing_fields=session.missing_fields,
             follow_up_questions=session.follow_up_questions,
@@ -623,8 +782,15 @@ class ParseService:
         )
 
     @staticmethod
-    def _append_message(session: ParseSessionState, role: str, content: str) -> None:
-        session.messages.append(SessionMessage(id=str(uuid4()), role=role, content=content))
+    def _append_message(
+        session: ParseSessionState,
+        role: str,
+        content: str,
+        reference_time: datetime | None = None,
+    ) -> None:
+        session.messages.append(
+            SessionMessage(id=str(uuid4()), role=role, content=content, reference_time=reference_time)
+        )
         session.updated_at = _aware_now()
 
     @staticmethod
@@ -635,6 +801,47 @@ class ParseService:
     @staticmethod
     def _user_messages(session: ParseSessionState) -> list[str]:
         return [message.content for message in session.messages if message.role == "user"]
+
+    @staticmethod
+    def _build_session_context(session: ParseSessionState, reference_time: datetime) -> dict[str, object] | None:
+        user_messages = [message for message in session.messages if message.role == "user"]
+        if len(user_messages) <= 1:
+            return None
+
+        prior_turns = user_messages[:-1]
+        replay_draft = ScheduleDraft(source=ScheduleSource.AI_PARSED)
+        turn_history: list[dict[str, object]] = []
+
+        for turn_index, message in enumerate(prior_turns, start=1):
+            turn_reference = message.reference_time or reference_time
+            replay_draft = _apply_update_plan(
+                replay_draft,
+                _build_fallback_update_plan(message.content, turn_reference, replay_draft),
+            )
+            turn_history.append(
+                {
+                    "turn_index": turn_index,
+                    "message": message.content,
+                    "reference_time": turn_reference.isoformat(),
+                    "draft_after_turn": replay_draft.model_dump(mode="json"),
+                }
+            )
+
+        field_history: dict[str, list[dict[str, object]]] = {field_name: [] for field_name in SESSION_HISTORY_FIELDS}
+        last_values: dict[str, object] = {}
+        for turn in turn_history:
+            draft_after_turn = turn["draft_after_turn"]
+            for field_name in SESSION_HISTORY_FIELDS:
+                value = draft_after_turn.get(field_name)
+                if value in (None, "") or last_values.get(field_name) == value:
+                    continue
+                field_history[field_name].append({"turn_index": turn["turn_index"], "value": value})
+                last_values[field_name] = value
+
+        return {
+            "prior_user_turns": turn_history,
+            "field_history": {key: value for key, value in field_history.items() if value},
+        }
 
     @staticmethod
     def _recompute_session_status(session: ParseSessionState) -> None:
@@ -648,16 +855,13 @@ class ParseService:
     @staticmethod
     async def _apply_message_turn(session: ParseSessionState, latest_message: str, reference_time: datetime) -> None:
         current_draft = session.draft.model_copy(deep=True)
-        parsed = await ParseService._build_draft_with_langchain(latest_message, reference_time, current_draft)
-        merged = _merge_draft(current_draft, parsed, latest_message)
-
-        if _message_clears_end_time(latest_message):
-            merged.end_time = None
-        else:
-            follow_up_end_time = _extract_follow_up_end_time(latest_message, merged.start_time, reference_time)
-            if follow_up_end_time is not None:
-                merged.end_time = follow_up_end_time
-
+        session_context = ParseService._build_session_context(session, reference_time)
+        merged = await ParseService._build_draft_with_langchain(
+            latest_message,
+            reference_time,
+            current_draft,
+            session_context,
+        )
         if current_draft.storage_strategy and not merged.storage_strategy:
             merged.storage_strategy = current_draft.storage_strategy
 
@@ -678,7 +882,7 @@ class ParseService:
     async def create_session(payload: ParseSessionCreateRequest, user_id: int) -> ParseSessionResponse:
         reference_time = _resolve_reference_time(payload.reference_time)
         session = ParseService._new_session(user_id)
-        ParseService._append_message(session, "user", payload.message.strip())
+        ParseService._append_message(session, "user", payload.message.strip(), reference_time)
         await ParseService._apply_message_turn(session, payload.message.strip(), reference_time)
         with ParseService._lock:
             ParseService._sessions[session.session_id] = session
@@ -700,7 +904,7 @@ class ParseService:
     ) -> ParseSessionResponse:
         reference_time = _resolve_reference_time(payload.reference_time)
         session = ParseService._require_session(session_id, user_id)
-        ParseService._append_message(session, "user", payload.message.strip())
+        ParseService._append_message(session, "user", payload.message.strip(), reference_time)
         await ParseService._apply_message_turn(session, payload.message.strip(), reference_time)
         return ParseService._build_session_response(session)
 
