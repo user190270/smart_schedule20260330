@@ -1,10 +1,10 @@
-# API Contract (R18 Terminal)
+# API Contract (R19 Terminal)
 
 ## Scope
 
-- This file is the terminal boundary for the Parse referential-update round.
+- This file is the terminal Parse contract boundary for the follow-up-context round.
 - Existing Parse routes stay in force.
-- Existing RAG, sync, CRUD, share, auth, and admin contracts remain in force and were not changed in this round.
+- Existing RAG, sync, CRUD, share, auth, and admin contracts remain in force and are out of scope.
 
 ## Parse Contract Preserved
 
@@ -23,27 +23,38 @@ Mandatory Parse guarantees preserved:
 - AI-parsed schedules still require explicit user confirmation before persistence.
 - Session-based clarification remains real backend-owned workflow state.
 - The existing frontend Parse page still renders chat messages, draft state, and confirmation flow without a contract-breaking rewrite.
-- Simple one-shot Parse behavior still works alongside the stronger multi-turn session semantics.
+- Existing field-level `keep / set / clear` semantics remain in force.
 
-## Behavioral Improvement Closed In This Round
+## Internal Improvement Closed In This Round
 
-- Multi-turn follow-up instructions now distinguish more intentionally between:
-  - adding a missing field
-  - replacing an existing field
-  - keeping an existing field unchanged
-  - clearing a previously filled field
-- Referential follow-up handling is now stronger for cases like:
-  - keep the previous time and change only location
-  - keep title and location while replacing time
-  - clear end time without touching other fields
-  - preserve an earlier referenced location while explicitly overriding title
-- Unrelated fields are preserved by default unless the latest message clearly replaces or clears them.
+- Parse session runtime payloads now carry stronger follow-up cues during session turns, including:
+  - recent dialogue window
+  - latest assistant follow-up message
+  - current `missing_fields`
+  - current `follow_up_questions`
+  - pending follow-up field list
+  - a single `active_follow_up_field` when one slot is clearly pending
+  - a `follow_up_reply_expected` signal when the latest reply is likely answering a pending clarification
+- These additions remain internal only; no externally visible Parse payload break was required.
+- A narrow internal guardrail was added for pending clarification slots:
+  - when the runtime keeps a field that is still actively pending
+  - and the existing fallback path extracts a concrete action for that same pending field
+  - the fallback action is used for that pending field rather than being discarded
 
-## Internal Implementation Boundary
+## Behavioral Goal Closed In This Round
 
-- Parse now uses a field-level internal update plan with `keep`, `set`, and `clear` semantics.
-- Parse model payloads now carry structured prior-turn context during session follow-ups.
-- These changes are internal only; no externally visible Parse payload break was required.
+- Given:
+  - first turn `明天到A-201开会`
+  - assistant follow-up asking for start time
+  - second turn `早上九点开始`
+- Parse now has a materially stronger path to interpret the second turn as a `start_time` completion rather than as an isolated fragment that leaves `start_time` missing.
+
+## Non-Goals Preserved
+
+- No large-scale expansion of heuristic time rules.
+- No conversion of Parse into a general chatbot.
+- No broad frontend redesign.
+- No RAG or sync contract changes.
 
 ## Terminal Verification Snapshot
 

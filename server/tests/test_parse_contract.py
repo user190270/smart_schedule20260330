@@ -163,6 +163,42 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertEqual(body["missing_fields"], [])
         self.assertTrue(body["ready_for_confirm"])
 
+    def test_parse_session_follow_up_short_answer_fills_missing_start_time(self) -> None:
+        create_response = self.client.post(
+            "/api/parse/sessions",
+            json={
+                "message": "明天到A-201开会",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(create_response.status_code, 200)
+        session_id = create_response.json()["parse_session_id"]
+
+        first_body = create_response.json()
+        self.assertEqual(first_body["draft"]["title"], "开会")
+        self.assertEqual(first_body["draft"]["location"], "A-201")
+        self.assertIsNone(first_body["draft"]["start_time"])
+        self.assertIn("start_time", first_body["missing_fields"])
+
+        continue_response = self.client.post(
+            f"/api/parse/sessions/{session_id}/messages",
+            json={
+                "message": "早上九点开始",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(continue_response.status_code, 200)
+
+        body = continue_response.json()
+        self.assertEqual(body["draft"]["title"], "开会")
+        self.assertEqual(body["draft"]["location"], "A-201")
+        self.assertEqual(body["draft"]["start_time"], "2026-03-28T09:00:00+08:00")
+        self.assertIsNone(body["draft"]["end_time"])
+        self.assertEqual(body["missing_fields"], [])
+        self.assertTrue(body["ready_for_confirm"])
+
     def test_parse_session_draft_patch_preserves_manual_override(self) -> None:
         create_response = self.client.post(
             "/api/parse/sessions",

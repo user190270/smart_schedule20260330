@@ -149,6 +149,76 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
             captured_payloads[1]["session_context"]["prior_user_turns"][0]["message"],
             "Tomorrow 9 to 10 design review in Room A.",
         )
+        self.assertEqual(
+            captured_payloads[1]["session_context"]["recent_dialogue"][-2]["role"],
+            "assistant",
+        )
+        self.assertNotIn("pending_follow_up_fields", captured_payloads[1]["session_context"])
+        runtime.ainvoke_structured_output.assert_awaited()
+
+    def test_parse_follow_up_context_guides_pending_slot_completion(self) -> None:
+        captured_payloads: list[dict] = []
+
+        async def fake_invoke_structured_output(**kwargs):
+            captured_payloads.append(kwargs["human_payload"])
+            if len(captured_payloads) == 1:
+                return ParseLLMOutput(
+                    title=ParseFieldUpdate(action="set", value="开会"),
+                    start_time=ParseFieldUpdate(action="keep"),
+                    end_time=ParseFieldUpdate(action="keep"),
+                    location=ParseFieldUpdate(action="set", value="A-201"),
+                    remark=ParseFieldUpdate(action="keep"),
+                    storage_strategy=ParseFieldUpdate(action="keep"),
+                )
+            return ParseLLMOutput(
+                title=ParseFieldUpdate(action="keep"),
+                start_time=ParseFieldUpdate(action="keep"),
+                end_time=ParseFieldUpdate(action="keep"),
+                location=ParseFieldUpdate(action="keep"),
+                remark=ParseFieldUpdate(action="keep"),
+                storage_strategy=ParseFieldUpdate(action="keep"),
+            )
+
+        runtime = type("FakeParseRuntime", (), {})()
+        runtime.ainvoke_structured_output = AsyncMock(side_effect=fake_invoke_structured_output)
+
+        with patch("app.services.parse_service.ParseService._get_runtime", return_value=runtime):
+            create_response = self.client.post(
+                "/api/parse/sessions",
+                json={
+                    "message": "明天到A-201开会",
+                    "reference_time": "2026-04-01T10:00:00+08:00",
+                },
+                headers=self.headers,
+            )
+            self.assertEqual(create_response.status_code, 200)
+            session_id = create_response.json()["parse_session_id"]
+
+            response = self.client.post(
+                f"/api/parse/sessions/{session_id}/messages",
+                json={
+                    "message": "早上九点开始",
+                    "reference_time": "2026-04-01T10:00:00+08:00",
+                },
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["draft"]["title"], "开会")
+        self.assertEqual(body["draft"]["location"], "A-201")
+        self.assertEqual(body["draft"]["start_time"], "2026-04-02T09:00:00+08:00")
+        self.assertEqual(body["missing_fields"], [])
+        self.assertTrue(body["ready_for_confirm"])
+
+        follow_up_context = captured_payloads[1]["session_context"]
+        self.assertEqual(follow_up_context["current_missing_fields"], ["start_time"])
+        self.assertEqual(follow_up_context["pending_follow_up_fields"], ["start_time"])
+        self.assertEqual(follow_up_context["active_follow_up_field"], "start_time")
+        self.assertEqual(follow_up_context["current_follow_up_questions"][0]["field"], "start_time")
+        self.assertTrue(follow_up_context["follow_up_reply_expected"])
+        self.assertIn("开始", follow_up_context["last_assistant_message"])
+        self.assertEqual(follow_up_context["recent_dialogue"][-1]["content"], "早上九点开始")
         runtime.ainvoke_structured_output.assert_awaited()
 
     def test_rag_paths_use_langchain_runtime_when_available(self) -> None:

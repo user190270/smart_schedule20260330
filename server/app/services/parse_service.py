@@ -128,6 +128,23 @@ class ParseSessionState:
 
 
 SESSION_HISTORY_FIELDS = ("title", "start_time", "end_time", "location")
+RECENT_DIALOGUE_WINDOW = 4
+CHINESE_HOUR_TOKEN_MAP = {
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    "十一": 11,
+    "十二": 12,
+}
 
 
 def _aware_now() -> datetime:
@@ -152,6 +169,21 @@ def _parse_iso_datetime(raw: str | None) -> datetime | None:
         return datetime.fromisoformat(normalized)
     except ValueError:
         return None
+
+
+def _normalize_common_chinese_time_digits(text: str) -> str:
+    def replace_hour(match: re.Match[str]) -> str:
+        token = match.group("hour_token")
+        value = CHINESE_HOUR_TOKEN_MAP.get(token)
+        if value is None:
+            return match.group(0)
+        return f"{value}{match.group('suffix')}"
+
+    return re.sub(
+        r"(?P<hour_token>十一|十二|十|两|[一二三四五六七八九零])(?P<suffix>点|时)",
+        replace_hour,
+        text,
+    )
 
 
 def _build_time(hour: int, minute: int | None, has_half: bool, meridiem: str) -> time:
@@ -253,7 +285,8 @@ def _extract_title(text: str, location: str | None) -> str | None:
     if location:
         cleaned = cleaned.replace(f"在{location}", "")
         cleaned = cleaned.replace(f"到{location}", "")
-    cleaned = TIME_RANGE_PATTERN.sub("", cleaned, count=1)
+    normalized = _normalize_common_chinese_time_digits(cleaned)
+    cleaned = TIME_RANGE_PATTERN.sub("", normalized, count=1)
     cleaned = END_ONLY_PATTERN.sub("", cleaned, count=1)
     cleaned = TIME_POINT_PATTERN.sub("", cleaned, count=1)
     cleaned = DATE_WORD_PATTERN.sub("", cleaned)
@@ -286,11 +319,17 @@ def _extract_title_override(text: str) -> str | None:
 
 
 def _has_explicit_time(text: str) -> bool:
-    return bool(TIME_RANGE_PATTERN.search(text) or TIME_POINT_PATTERN.search(text) or END_ONLY_PATTERN.search(text))
+    normalized = _normalize_common_chinese_time_digits(text)
+    return bool(
+        TIME_RANGE_PATTERN.search(normalized)
+        or TIME_POINT_PATTERN.search(normalized)
+        or END_ONLY_PATTERN.search(normalized)
+    )
 
 
 def _extract_temporal_range(text: str, reference_time: datetime) -> tuple[datetime | None, datetime | None]:
-    iso_datetimes = _extract_iso_datetimes(text)
+    normalized_text = _normalize_common_chinese_time_digits(text)
+    iso_datetimes = _extract_iso_datetimes(normalized_text)
     if len(iso_datetimes) >= 2:
         return iso_datetimes[0], iso_datetimes[1]
     if len(iso_datetimes) == 1:
@@ -299,7 +338,7 @@ def _extract_temporal_range(text: str, reference_time: datetime) -> tuple[dateti
     target_date = _resolve_target_date(text, reference_time)
     meridiem = _resolve_meridiem(text)
 
-    range_match = TIME_RANGE_PATTERN.search(text)
+    range_match = TIME_RANGE_PATTERN.search(normalized_text)
     if range_match:
         start_time = _build_time(
             hour=int(range_match.group("start_hour")),
@@ -319,7 +358,7 @@ def _extract_temporal_range(text: str, reference_time: datetime) -> tuple[dateti
             end += timedelta(days=1)
         return start, end
 
-    point_match = TIME_POINT_PATTERN.search(text)
+    point_match = TIME_POINT_PATTERN.search(normalized_text)
     if point_match:
         start_time = _build_time(
             hour=int(point_match.group("hour")),
@@ -365,7 +404,8 @@ def _resolve_session_anchor_date(
 def _extract_follow_up_end_time(text: str, base_start_time: datetime | None, reference_time: datetime) -> datetime | None:
     if base_start_time is None:
         return None
-    match = END_ONLY_PATTERN.search(text)
+    normalized_text = _normalize_common_chinese_time_digits(text)
+    match = END_ONLY_PATTERN.search(normalized_text)
     if not match:
         return None
     meridiem = _resolve_meridiem(text)
@@ -427,6 +467,13 @@ def _build_follow_up_questions(missing_fields: list[str]) -> list[ParseFollowUpQ
         ParseFollowUpQuestion(field=field, question=prompts.get(field, f"请补充 {field}。"))
         for field in missing_fields
     ]
+
+
+def _latest_assistant_message(session: ParseSessionState) -> str | None:
+    for message in reversed(session.messages):
+        if message.role == "assistant":
+            return message.content
+    return None
 
 
 def _draft_visible(draft: ScheduleDraft) -> bool:
@@ -601,13 +648,25 @@ def _normalize_storage_update(update: ParseFieldUpdate | None, fallback: ParseFi
     return fallback
 
 
-def _combine_runtime_and_fallback_plan(parsed: ParseLLMOutput, fallback: ParseLLMOutput) -> ParseLLMOutput:
+def _combine_runtime_and_fallback_plan(
+    parsed: ParseLLMOutput,
+    fallback: ParseLLMOutput,
+    preferred_fallback_fields: set[str] | None = None,
+) -> ParseLLMOutput:
     field_names = ("title", "start_time", "end_time", "location", "remark", "storage_strategy")
     combined = _empty_update_plan()
+    preferred_fallback_fields = preferred_fallback_fields or set()
 
     for field_name in field_names:
         parsed_update = getattr(parsed, field_name) if field_name in parsed.model_fields_set else None
         fallback_update = getattr(fallback, field_name)
+        if (
+            field_name in preferred_fallback_fields
+            and parsed_update is not None
+            and parsed_update.action == "keep"
+            and fallback_update.action in {"set", "clear"}
+        ):
+            parsed_update = fallback_update
         if field_name in {"start_time", "end_time"}:
             normalized = _normalize_datetime_update(parsed_update, fallback_update)
         elif field_name == "storage_strategy":
@@ -711,6 +770,10 @@ class ParseService:
             "Use keep when the latest message does not change that field. "
             "Use clear only when the user explicitly removes a field. "
             "Use prior turns to resolve references like previous, earlier, first, or second turn. "
+            "If session_context includes a last_assistant_message, current_missing_fields, "
+            "current_follow_up_questions, or an active_follow_up_field, treat a short latest_user_message "
+            "as a likely answer to that pending clarification before treating it as an isolated statement. "
+            "When active_follow_up_field is present, prefer mapping a compatible short reply to that field. "
             "Preserve unrelated draft information unless the latest message clearly replaces it. "
             "Do not fabricate a precise end_time if the user did not provide one."
         )
@@ -724,7 +787,19 @@ class ParseService:
         except AiRuntimeError:
             return fallback_preview
 
-        combined_plan = _combine_runtime_and_fallback_plan(parsed, fallback_plan)
+        preferred_fallback_fields = set()
+        if session_context:
+            pending_fields = session_context.get("pending_follow_up_fields")
+            if isinstance(pending_fields, list):
+                preferred_fallback_fields = {
+                    field_name for field_name in pending_fields if isinstance(field_name, str)
+                }
+
+        combined_plan = _combine_runtime_and_fallback_plan(
+            parsed,
+            fallback_plan,
+            preferred_fallback_fields=preferred_fallback_fields,
+        )
         return _apply_update_plan(base_draft, combined_plan)
 
     @staticmethod
@@ -805,8 +880,6 @@ class ParseService:
     @staticmethod
     def _build_session_context(session: ParseSessionState, reference_time: datetime) -> dict[str, object] | None:
         user_messages = [message for message in session.messages if message.role == "user"]
-        if len(user_messages) <= 1:
-            return None
 
         prior_turns = user_messages[:-1]
         replay_draft = ScheduleDraft(source=ScheduleSource.AI_PARSED)
@@ -838,10 +911,45 @@ class ParseService:
                 field_history[field_name].append({"turn_index": turn["turn_index"], "value": value})
                 last_values[field_name] = value
 
-        return {
-            "prior_user_turns": turn_history,
-            "field_history": {key: value for key, value in field_history.items() if value},
-        }
+        recent_dialogue: list[dict[str, object]] = []
+        for message in session.messages[-RECENT_DIALOGUE_WINDOW:]:
+            item: dict[str, object] = {
+                "role": message.role,
+                "content": message.content,
+            }
+            if message.reference_time is not None:
+                item["reference_time"] = message.reference_time.isoformat()
+            recent_dialogue.append(item)
+
+        current_follow_up_questions = [
+            item.model_dump(mode="json") for item in session.follow_up_questions
+        ]
+        pending_follow_up_fields = [item.field for item in session.follow_up_questions]
+        active_follow_up_field = pending_follow_up_fields[0] if len(pending_follow_up_fields) == 1 else None
+        last_assistant_message = _latest_assistant_message(session)
+
+        context: dict[str, object] = {}
+        if turn_history:
+            context["prior_user_turns"] = turn_history
+        filtered_field_history = {key: value for key, value in field_history.items() if value}
+        if filtered_field_history:
+            context["field_history"] = filtered_field_history
+        if recent_dialogue:
+            context["recent_dialogue"] = recent_dialogue
+        if session.missing_fields:
+            context["current_missing_fields"] = list(session.missing_fields)
+        if current_follow_up_questions:
+            context["current_follow_up_questions"] = current_follow_up_questions
+        if pending_follow_up_fields:
+            context["pending_follow_up_fields"] = pending_follow_up_fields
+        if active_follow_up_field:
+            context["active_follow_up_field"] = active_follow_up_field
+        if last_assistant_message:
+            context["last_assistant_message"] = last_assistant_message
+        if last_assistant_message and pending_follow_up_fields:
+            context["follow_up_reply_expected"] = True
+
+        return context or None
 
     @staticmethod
     def _recompute_session_status(session: ParseSessionState) -> None:
