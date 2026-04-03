@@ -85,10 +85,19 @@ async def stream_answer(
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
-    def event_iterator():
+    async def event_iterator():
         yield _sse_event("meta", {"retrieved_chunks": len(prepared.retrieved.results)})
-        for token in prepared.answer_text.split():
-            yield _sse_event("token", {"text": token})
-        yield _sse_event("done", {"message": "stream_completed"})
+        collected_chunks: list[str] = []
+        completion_message = "stream_completed"
+
+        try:
+            async for chunk in RagService.stream_answer_text(payload.query, prepared.retrieved):
+                collected_chunks.append(chunk)
+                yield _sse_event("token", {"text": chunk})
+            RagService.finalize_stream_answer(user_id, payload.query, collected_chunks)
+        except RuntimeError:
+            completion_message = "stream_failed"
+
+        yield _sse_event("done", {"message": completion_message})
 
     return StreamingResponse(event_iterator(), media_type="text/event-stream")

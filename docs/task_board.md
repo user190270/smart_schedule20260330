@@ -1,46 +1,45 @@
-# Progress Tracker (R19 - Parse Follow-Up Context Reinforcement)
+# Progress Tracker (R20 - RAG True Streaming Output)
 
 ## Legend
 
 - `[x]` Completed
-- `[>]` Current
 - `[ ]` Pending
 
 ## Round Rules
 
-- This round is TERMINAL.
-- The target fix stayed inside Parse follow-up context packaging rather than broad heuristic expansion.
-- External Parse routes and frontend flow stayed unchanged.
+- This round stayed limited to true streaming output for the RAG answer path.
+- Retrieval remained in scope only as preserved prerequisite context.
+- Frontend changes stayed minimal and only served correct real-time chunk display.
 
-- [x] `P1` Follow-up context contract and planning
-  - [x] `P1-S1` Define the minimal model-facing follow-up context package needed to relate the latest short user reply to the previous assistant clarification prompt.
-  - [x] `P1-S2` Lock the execution boundary for `session_context`, `missing_fields`, `follow_up_questions`, and any explicit pending-slot cue without widening the round into frontend redesign or rule explosion.
-  - `done_when`: the active docs clearly define the Parse-only implementation boundary, target follow-up context additions, and preserved contract constraints for this round.
-  - `verification_plan`: code-informed docs audit against the current Parse service plus docs consistency verification.
+- [x] `P1` Streaming contract and plan refresh
+  - [x] `P1-S1` Confirm the current fake-streaming path in route, service, runtime, and frontend consumption code, and lock the minimum preserved contract for a real-streaming refactor.
+  - [x] `P1-S2` Define the smallest implementation seam for real streaming, answer accumulation, and post-stream persistence without widening scope into RAG product redesign.
+  - `done_when`: the active docs clearly define the real-streaming target, preserved SSE contract, storage timing boundary, and minimal frontend alignment for this round.
+  - `verification_plan`: code-informed docs audit against the current RAG route/service/frontend plus docs consistency verification.
 
-- [x] `P2` Backend follow-up context implementation
-  - [x] `P2-S1` Extend Parse follow-up context assembly so the model can see the most relevant recent dialogue relationship, especially the previous assistant follow-up and the current user reply.
-  - [x] `P2-S2` Add current `missing_fields`, `follow_up_questions`, and any explicit pending slot or last-assistant cue required for stable short-answer interpretation, while preserving `keep / set / clear`.
-  - `done_when`: short follow-up answers are materially better grounded in the active clarification state without changing the external Parse contract.
-  - `verification_plan`: targeted Parse code audit plus focused backend tests around follow-up completion.
+- [x] `P2` Backend true-streaming RAG path
+  - [x] `P2-S1` Refactor the RAG service seam so retrieval remains precomputed but answer generation can be consumed as an async stream from the runtime.
+  - [x] `P2-S2` Refactor the RAG route to emit SSE `token` events directly from the streaming iterator and send `done` only after stream completion.
+  - `done_when`: backend token events originate from true streaming output rather than a completed answer split afterward.
+  - `verification_plan`: focused backend streaming tests plus route-level SSE verification.
 
-- [x] `P3` Regression coverage for follow-up completion
-  - [x] `P3-S1` Add or update backend tests for the scenario `明天到A-201开会` followed by `早上九点开始`.
-  - [x] `P3-S2` Re-run and preserve existing Parse contract and referential-update regression from earlier rounds.
-  - `done_when`: the test suite proves the new follow-up-context path while preserving one-shot Parse and prior referential behavior.
-  - `verification_plan`: focused Parse tests plus full Parse regression as needed.
+- [x] `P3` Answer accumulation and persistence safety
+  - [x] `P3-S1` Accumulate streamed chunks into a final answer buffer during generation.
+  - [x] `P3-S2` Save chat history only after the stream completes successfully, or handle failure explicitly without corrupting history state.
+  - `done_when`: the system can both stream progressively and retain a coherent final answer for persistence.
+  - `verification_plan`: service-level tests for accumulation, completion, and failure handling.
 
-- [x] `P4` Minimal contract or UI alignment if needed
-  - [x] `P4-S1` Confirm that no frontend/API adjustment is required; if one is needed, keep it additive and minimal.
-  - [x] `P4-S2` Keep the current Parse page and route contract unchanged because the backend context improvement remained internally compatible.
-  - `done_when`: any visible adjustment remains minimal, additive, and justified by backend behavior.
-  - `verification_plan`: targeted manual sanity check only if this phase is actually entered.
+- [x] `P4` Frontend streaming-consumption alignment
+  - [x] `P4-S1` Adjust the RAG frontend stream consumer only as needed for real chunk append behavior.
+  - [x] `P4-S2` Verify the page still renders `meta / token / done` events correctly and avoids broken spacing or duplicate text.
+  - `done_when`: the RAG page shows progressively arriving content without obvious text-join artifacts.
+  - `verification_plan`: local page sanity check plus frontend build.
 
 - [x] `P5` Verification and round acceptance
-  - [x] `P5-S1` Run focused Parse follow-up tests and existing Parse regression.
-  - [x] `P5-S2` Run required LangChain payload regression and local build checks touched by the final change set.
-  - `done_when`: short follow-up answers fill pending fields more reliably, and existing Parse semantics remain intact.
-  - `verification_plan`: Parse tests, LangChain integration checks when applicable, and final docs consistency confirmation.
+  - [x] `P5-S1` Run focused backend tests for true streaming behavior and preserved retrieval/QA flow.
+  - [x] `P5-S2` Run required local build and docs consistency checks, then close the round only if true streaming is evidenced.
+  - `done_when`: real streaming is established end-to-end locally and the preserved RAG contract still holds.
+  - `verification_plan`: backend tests, local frontend validation, build checks, and final docs consistency confirmation.
 
 - `current_phase`: `COMPLETED`
 - `current_step`: `LOCAL BUILD VERIFIED`

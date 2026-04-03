@@ -37,3 +37,5 @@ tmp-realdevice-logcat*.txt
 frontend/android/**/build/
 frontend/android/.cxx/
 frontend/android/local.properties
+
+.git-upload-*/

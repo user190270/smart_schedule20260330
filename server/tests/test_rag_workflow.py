@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -11,8 +12,27 @@ from app.core.database import SessionLocal
 from app.main import app
 from app.models import ChatHistory, KnowledgeBaseState, Schedule, VectorChunk
 from app.models.enums import ScheduleSource
+from app.services.ai_runtime import AiRuntimeError
 from tests.auth_helpers import register_user
 from tests.db_helpers import reset_database
+
+
+def parse_sse_events(body_text: str) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    for chunk in body_text.split("\n\n"):
+        if not chunk.strip():
+            continue
+        event_line = next((line for line in chunk.splitlines() if line.startswith("event: ")), None)
+        data_line = next((line for line in chunk.splitlines() if line.startswith("data: ")), None)
+        if event_line is None or data_line is None:
+            continue
+        events.append(
+            {
+                "event": event_line.removeprefix("event: ").strip(),
+                "data": json.loads(data_line.removeprefix("data: ").strip()),
+            }
+        )
+    return events
 
 
 class RagWorkflowTestCase(unittest.TestCase):
@@ -211,6 +231,88 @@ class RagWorkflowTestCase(unittest.TestCase):
             self.assertTrue(len(last_two_contents[1]) > 0)
             history_user_b = list(db.scalars(select(ChatHistory).where(ChatHistory.user_id == self.user_b_id)).all())
             self.assertEqual(history_user_b, [])
+
+    def test_stream_answer_forwards_runtime_chunks_in_order(self) -> None:
+        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+            return [[round(0.02 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
+
+        def fake_astream_text(**kwargs):
+            self.assertEqual(kwargs["human_payload"]["query"], "Stream the answer please.")
+
+            async def iterator():
+                for chunk in ("Alpha ", "Beta", " + Gamma"):
+                    yield chunk
+
+            return iterator()
+
+        runtime = type("FakeStreamingRuntime", (), {})()
+        runtime.aembed_documents = AsyncMock(side_effect=fake_embed_documents)
+        runtime.aembed_query = AsyncMock(return_value=[0.08] * 3072)
+        runtime.astream_text = MagicMock(side_effect=fake_astream_text)
+
+        with patch("app.services.rag_service.RagService._get_runtime", return_value=runtime):
+            self.client.post(f"/api/rag/chunks/rebuild/{self.schedule_a_id}", json={"chunk_size": 30}, headers=self.headers_a)
+            response = self.client.post(
+                "/api/rag/answer/stream",
+                json={"query": "Stream the answer please.", "top_k": 3},
+                headers=self.headers_a,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        events = parse_sse_events(response.text)
+        self.assertEqual([item["event"] for item in events], ["meta", "token", "token", "token", "done"])
+        self.assertEqual(
+            [item["data"]["text"] for item in events if item["event"] == "token"],
+            ["Alpha ", "Beta", " + Gamma"],
+        )
+        self.assertEqual(events[-1]["data"]["message"], "stream_completed")
+
+        with SessionLocal() as db:
+            history = list(
+                db.scalars(
+                    select(ChatHistory)
+                    .where(ChatHistory.user_id == self.user_a_id)
+                    .order_by(ChatHistory.id.asc())
+                ).all()
+            )
+            self.assertGreaterEqual(len(history), 2)
+            self.assertEqual(history[-1].content, "Alpha Beta + Gamma")
+
+    def test_stream_answer_emits_done_on_runtime_failure_without_persisting_partial_history(self) -> None:
+        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+            return [[round(0.03 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
+
+        def fake_astream_text(**kwargs):
+            self.assertEqual(kwargs["human_payload"]["query"], "Fail mid stream")
+
+            async def iterator():
+                yield "Partial answer"
+                raise AiRuntimeError("stream interrupted")
+
+            return iterator()
+
+        runtime = type("FakeBrokenStreamingRuntime", (), {})()
+        runtime.aembed_documents = AsyncMock(side_effect=fake_embed_documents)
+        runtime.aembed_query = AsyncMock(return_value=[0.09] * 3072)
+        runtime.astream_text = MagicMock(side_effect=fake_astream_text)
+
+        with patch("app.services.rag_service.RagService._get_runtime", return_value=runtime):
+            self.client.post(f"/api/rag/chunks/rebuild/{self.schedule_a_id}", json={"chunk_size": 30}, headers=self.headers_a)
+            response = self.client.post(
+                "/api/rag/answer/stream",
+                json={"query": "Fail mid stream", "top_k": 3},
+                headers=self.headers_a,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        events = parse_sse_events(response.text)
+        self.assertEqual([item["event"] for item in events], ["meta", "token", "done"])
+        self.assertEqual(events[1]["data"]["text"], "Partial answer")
+        self.assertEqual(events[-1]["data"]["message"], "stream_failed")
+
+        with SessionLocal() as db:
+            history = list(db.scalars(select(ChatHistory).where(ChatHistory.user_id == self.user_a_id)).all())
+            self.assertEqual(history, [])
 
 
 if __name__ == "__main__":

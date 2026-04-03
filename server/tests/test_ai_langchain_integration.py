@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
@@ -225,10 +225,21 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
         async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
             return [[round(0.01 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
 
+        streamed_payloads: list[dict] = []
+
+        def fake_astream_text(**kwargs):
+            streamed_payloads.append(kwargs["human_payload"])
+
+            async def iterator():
+                for chunk in ("Focus ", "on async AI ", "path isolation."):
+                    yield chunk
+
+            return iterator()
+
         runtime = type("FakeRagRuntime", (), {})()
         runtime.aembed_documents = AsyncMock(side_effect=fake_embed_documents)
         runtime.aembed_query = AsyncMock(return_value=[0.04] * 3072)
-        runtime.ainvoke_text = AsyncMock(return_value="Focus on async AI path isolation.")
+        runtime.astream_text = MagicMock(side_effect=fake_astream_text)
 
         with patch("app.services.rag_service.RagService._get_runtime", return_value=runtime):
             rebuild_response = self.client.post(
@@ -255,7 +266,8 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
 
         runtime.aembed_documents.assert_awaited()
         runtime.aembed_query.assert_awaited()
-        runtime.ainvoke_text.assert_awaited()
+        runtime.astream_text.assert_called_once()
+        self.assertEqual(streamed_payloads[0]["query"], "What should I focus on?")
 
         with SessionLocal() as db:
             chunk_count = len(

@@ -79,3 +79,16 @@
 - `impact`:
   - `server/app/services/parse_service.py` now sends the latest assistant clarification, current missing fields, current follow-up questions, and recent dialogue cues inside `session_context`.
   - The `keep / set / clear` seam remains intact, but a pending field can now prefer the fallback action over a runtime `keep` when that field is still the active clarification target.
+
+### D-086
+
+- `status`: active
+- `decision`: RAG true streaming preserves the existing `meta / token / done` SSE contract while shifting token generation to the runtime streaming iterator and delaying assistant-history persistence until successful completion.
+- `reason`:
+  - The product already has a working frontend SSE consumer, so event-shape churn would add unnecessary migration risk.
+  - The actual implementation gap was backend timing semantics, not route naming.
+  - Persisting partial assistant text on a failed stream would make chat history inconsistent with what the user actually received.
+- `impact`:
+  - `server/app/routers/rag.py` forwards real runtime chunks as `token` events and emits terminal `done` markers.
+  - `server/app/services/rag_service.py` accumulates streamed chunks and writes chat history only after successful completion.
+  - `frontend/src/views/RagView.vue` appends raw chunk text instead of adding a forced trailing space to each token.

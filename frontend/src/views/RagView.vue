@@ -295,9 +295,16 @@ async function runStream() {
           lastDiagnosticKey.value = "indexed_no_hit";
         }
       } else if (event.event === "token") {
-        answerText.value += `${event.data.text} `;
-      } else if (event.event === "done" && !answerText.value.trim()) {
-        answerText.value = "AI 没有返回可显示的内容。";
+        answerText.value += event.data.text;
+      } else if (event.event === "done") {
+        if (event.data.message === "stream_failed") {
+          showNotify({ type: "warning", message: "AI 流式回答中途中断，请稍后重试。" });
+          if (!answerText.value.trim()) {
+            answerText.value = "AI 流式回答中途中断，请稍后重试。";
+          }
+        } else if (!answerText.value.trim()) {
+          answerText.value = "AI 没有返回可显示的内容。";
+        }
       }
     }
   } catch (error) {

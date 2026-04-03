@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable
 
 from sqlalchemy import delete, select, text
 
@@ -59,9 +59,8 @@ class ChunkWritePlan:
 
 
 @dataclass(frozen=True)
-class PreparedRagAnswer:
+class PreparedRagStream:
     retrieved: RagRetrieveResponse
-    answer_text: str
 
 
 class RagService:
@@ -279,6 +278,36 @@ class RagService:
             db.commit()
 
     @staticmethod
+    def _build_answer_snippets(retrieved: RagRetrieveResponse) -> list[dict[str, object]]:
+        return [
+            {
+                "schedule_id": item.schedule_id,
+                "content": item.content,
+                "score": item.score,
+            }
+            for item in retrieved.results[:5]
+        ]
+
+    @staticmethod
+    def _fallback_answer_text(retrieved: RagRetrieveResponse) -> str:
+        if not retrieved.results:
+            return (
+                "No relevant schedule context was retrieved yet. "
+                "Try rebuilding the knowledge base or ask a more specific question."
+            )
+
+        snippets = RagService._build_answer_snippets(retrieved)
+        preview = "\n".join(f"- {item['content']}" for item in snippets)
+        return f"Based on the currently retrieved schedule context, here are the most relevant notes:\n{preview}"
+
+    @staticmethod
+    def finalize_stream_answer(user_id: int, user_query: str, chunks: list[str]) -> str:
+        answer_text = "".join(chunks).strip()
+        if answer_text:
+            RagService._save_chat_turn(user_id, user_query, answer_text)
+        return answer_text
+
+    @staticmethod
     async def rebuild_chunks_for_schedule(
         user_id: int,
         schedule_id: int,
@@ -455,23 +484,12 @@ class RagService:
     @staticmethod
     async def build_answer_text(query: str, retrieved: RagRetrieveResponse) -> str:
         if not retrieved.results:
-            return (
-                "No relevant schedule context was retrieved yet. "
-                "Try rebuilding the knowledge base or ask a more specific question."
-            )
+            return RagService._fallback_answer_text(retrieved)
 
         runtime = RagService._get_runtime()
-        snippets = [
-            {
-                "schedule_id": item.schedule_id,
-                "content": item.content,
-                "score": item.score,
-            }
-            for item in retrieved.results[:5]
-        ]
+        snippets = RagService._build_answer_snippets(retrieved)
         if runtime is None:
-            preview = "\n".join(f"- {item['content']}" for item in snippets)
-            return f"Based on the currently retrieved schedule context, here are the most relevant notes:\n{preview}"
+            return RagService._fallback_answer_text(retrieved)
 
         try:
             return await runtime.ainvoke_text(
@@ -490,12 +508,40 @@ class RagService:
             raise RuntimeError(str(exc)) from exc
 
     @staticmethod
+    async def stream_answer_text(
+        query: str,
+        retrieved: RagRetrieveResponse,
+    ) -> AsyncIterator[str]:
+        runtime = RagService._get_runtime()
+        if runtime is None or not retrieved.results:
+            yield RagService._fallback_answer_text(retrieved)
+            return
+
+        snippets = RagService._build_answer_snippets(retrieved)
+        try:
+            async for chunk in runtime.astream_text(
+                system_prompt=(
+                    "You are the knowledge-base answering service for a schedule app. "
+                    "Answer only from the supplied schedule context. "
+                    "If the context is insufficient, say what is missing."
+                ),
+                human_payload={
+                    "query": query,
+                    "schedule_context": snippets,
+                },
+                temperature=0.2,
+            ):
+                if chunk:
+                    yield chunk
+        except AiRuntimeError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    @staticmethod
     async def prepare_stream_answer(
         user_id: int,
         query: str,
         top_k: int,
-    ) -> PreparedRagAnswer:
+    ) -> PreparedRagStream:
+        _ = user_id
         retrieved = await RagService.retrieve_chunks(user_id=user_id, query=query, top_k=top_k)
-        answer_text = await RagService.build_answer_text(query, retrieved)
-        RagService._save_chat_turn(user_id, query, answer_text)
-        return PreparedRagAnswer(retrieved=retrieved, answer_text=answer_text)
+        return PreparedRagStream(retrieved=retrieved)
