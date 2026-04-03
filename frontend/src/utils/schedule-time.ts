@@ -60,3 +60,19 @@ export function fromDatetimeLocalValue(inputValue: string | null | undefined): s
   }
   return dt.toISOString();
 }
+
+export function toOffsetIsoString(value: Date): string {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  const hour = `${value.getHours()}`.padStart(2, "0");
+  const minute = `${value.getMinutes()}`.padStart(2, "0");
+  const second = `${value.getSeconds()}`.padStart(2, "0");
+  const offsetMinutes = -value.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offsetHour = `${Math.floor(absoluteOffset / 60)}`.padStart(2, "0");
+  const offsetMinute = `${absoluteOffset % 60}`.padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}${sign}${offsetHour}:${offsetMinute}`;
+}

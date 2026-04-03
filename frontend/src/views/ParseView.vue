@@ -208,7 +208,12 @@ import {
 import type { ScheduleStorageStrategy } from "@/repositories/local-schedules";
 import { useAuthStore } from "@/stores/auth";
 import { useLocalScheduleStore } from "@/stores/local-schedules";
-import { formatScheduleDateTime, fromDatetimeLocalValue, toDatetimeLocalValue } from "@/utils/schedule-time";
+import {
+  formatScheduleDateTime,
+  fromDatetimeLocalValue,
+  toDatetimeLocalValue,
+  toOffsetIsoString
+} from "@/utils/schedule-time";
 
 type DraftFieldKey = "title" | "start_time" | "end_time" | "location" | "remark";
 type DraftFormState = {
@@ -336,7 +341,7 @@ function mapMissingFieldLabel(field: string): string {
 }
 
 function buildReferenceTime(): string {
-  return new Date().toISOString();
+  return toOffsetIsoString(new Date());
 }
 
 function formatError(error: unknown, fallback: string): string {
