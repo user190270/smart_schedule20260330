@@ -1,61 +1,59 @@
-# Working Contract (R20 - RAG True Streaming Output)
+# Working Contract (R25 - RAG Context Rechunking And Local Time Grounding)
 
 ## Reading Order
 1. `docs/working_contract.md`
 2. `docs/current_state.md`
 3. `docs/task_board.md`
 4. `docs/api_contract.md`
-5. `docs/decision_log.md` only if older tradeoffs need explanation
+5. `docs/decision_log.md` only if an older RAG tradeoff needs explanation
 
-## Round Outcome
+## Round Goal
 
-- Round 20 (R20) is complete.
-- This round corrected the RAG answer path from synthetic SSE token splitting to true streaming after retrieval.
-- The preserved boundary remains:
-  - retrieval still finishes first
-  - the route still emits `meta / token / done`
-  - chat history is still available after a successful stream
-- The changed boundary is:
-  - `token` events now come from the runtime streaming iterator instead of `answer_text.split()`
-  - the final answer is accumulated during streaming and saved only after a successful completion
-  - the frontend now appends raw streamed chunks instead of forcing a trailing space per token
+Repair the current RAG answer quality collapse without broadening product scope:
 
-## Implemented Scope
+1. Stop cutting schedule knowledge into semantically broken fixed-width fragments.
+2. Stop grounding temporal reasoning on UTC-looking text that does not match the user's local-time view.
+3. Stop sending duplicate fragmented schedule snippets straight into answer generation without schedule-level consolidation.
+4. Preserve true streaming and lightweight multi-turn follow-up behavior from R20/R21.
 
-- `server/app/routers/rag.py`
+## Scope
+
+### In Scope
 - `server/app/services/rag_service.py`
-- `frontend/src/views/RagView.vue`
-- `server/tests/test_rag_workflow.py`
-- `server/tests/test_ai_langchain_integration.py`
+- `server/app/routers/rag.py` only if stream metadata needs the smallest supporting adjustment
+- `server/app/schemas/rag.py` only if a minimal chunking-default adjustment is warranted
+- RAG-related backend tests
 - active round docs
+- `docs/decision_log.md` only if the new RAG orchestration tradeoffs need to be made durable
 
-## Constraints Preserved
+### Out of Scope
+- Parse service or Parse frontend work
+- sync / Pull reconciliation
+- auth, admin, share
+- RAG frontend redesign beyond the smallest verification aid
+- `skills/`, `prompts/`, `media/`
+- cloud deployment
+- replacing the LLM provider or broad model experimentation
 
-- No Parse changes were introduced for this round.
-- No RAG route proliferation was introduced.
-- The existing SSE event names remain:
-  - `meta`
-  - `token`
-  - `done`
-- Retrieval continues to use the existing pgvector-based flow.
-- Frontend changes stayed minimal and limited to chunk append behavior and stream-failure messaging.
-- No cloud deployment was performed as part of this round.
-- `prompts/`, `media/`, and `skills/` remained untouched.
+## Constraints
 
-## Verification Summary
+- R20 true streaming (`meta / token / done`) must remain intact.
+- R21 lightweight multi-turn behavior must remain intact.
+- Single-turn RAG must not regress.
+- User isolation by `user_id` must not regress.
+- This round should remain primarily backend-focused.
+- Local verification may temporarily point the frontend to local API, but defaults must be restored before round end.
 
-- Focused RAG integration tests passed:
-  - `docker compose exec api pytest tests/test_ai_langchain_integration.py -q`
-  - `docker compose exec api pytest tests/test_rag_workflow.py -q`
-- Full backend test suite passed:
-  - `docker compose exec api pytest tests -q`
-- Frontend build passed:
-  - `docker compose exec frontend npm run build`
-- Local API health check passed:
-  - `GET /api/health`
-- Browser-tool page sanity verification was attempted but the local Playwright session failed before navigation, so the round relies on route-level streaming tests plus frontend build verification rather than a completed browser walkthrough.
+## RAG Repair Strategy
 
-## Durable Takeaway
+- Replace raw fixed-width character chunking with schedule-aware chunking that keeps one schedule's factual context semantically coherent.
+- Rebuild indexed schedule text around user-facing local-time facts instead of raw UTC-looking timestamps.
+- Before answer generation, merge retrieved chunk hits into schedule-level candidates so the model sees deduplicated schedule facts rather than repeated fragments.
+- Strengthen the answer-generation prompt so time-comparison questions (`earliest`, `latest`, `what date`, `what time`) are answered by comparing the supplied structured candidates instead of free-form extrapolation.
 
-- This round is evidence-backed for "real streaming output" only because the backend route now forwards runtime chunks directly.
-- Future rounds should preserve this distinction and avoid reintroducing display-only fake streaming.
+## Verification Strategy
+
+- Prove that rebuild results no longer explode a small schedule set into many arbitrary fragments under normal chunk-size settings.
+- Prove that indexed content includes local-time-oriented date/time text.
+- Prove that answer-generation payloads are grouped at the schedule level before being sent to the runtime.
+- Re-run targeted RAG tests plus broad backend regression and frontend build verification.

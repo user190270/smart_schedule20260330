@@ -1,52 +1,32 @@
-# API Contract (R20 Completed)
+# API Contract (R25 Completed)
 
 ## Scope
 
-- This file records the finalized contract boundary for the RAG true-streaming round.
-- Parse, sync, CRUD, share, auth, and admin contracts remain unchanged.
-- The focal route remains `POST /api/rag/answer/stream`.
+- This round remains primarily backend-focused.
+- Existing routes should remain stable unless a minimal default or metadata adjustment is necessary.
+- No frontend request-shape churn is planned by default.
 
-## Preserved External Contract
+## RAG Boundary
 
-- Route:
+- Existing RAG routes remain:
+  - `POST /api/rag/retrieve`
   - `POST /api/rag/answer/stream`
-- SSE event names:
+  - `POST /api/rag/chunks/rebuild/{schedule_id}`
+  - `POST /api/rag/chunks/rebuild-all`
+- Existing SSE event contract remains:
   - `meta`
   - `token`
   - `done`
-- Event meaning:
-  - `meta`: retrieval summary, especially retrieved chunk count
-  - `token`: streamed answer content fragment
-  - `done`: terminal stream marker
-- Frontend consumer shape in `frontend/src/api/rag.ts` remains compatible with the same event names.
 
-## Corrected Internal Timing Semantics
+## Intended Semantic Changes
 
-- Retrieval still completes before answer generation starts.
-- After retrieval, the backend now forwards chunks directly from `LangChainAiRuntime.astream_text(...)`.
-- `token` events are no longer derived from splitting a completed answer string.
-- The route accumulates streamed chunks during generation.
-- Chat history is written only after successful stream completion.
+- Chunk construction is expected to become schedule-aware rather than raw fixed-width character slicing.
+- Indexed content is expected to expose local-time-oriented date/time facts instead of raw UTC-heavy temporal text.
+- Answer-generation payloads may become schedule-level grouped candidates rather than a flat list of arbitrary fragment snippets.
 
-## Minimal Additive Behavior
+## Compatibility Guardrails
 
-- `done.data.message` now distinguishes:
-  - `stream_completed`
-  - `stream_failed`
-- This is a minimal terminal-state clarification and does not alter the event names or the frontend stream parser shape.
-
-## Frontend Consumption Boundary
-
-- The frontend still consumes the stream through `fetch + getReader + TextDecoder`.
-- The main consumption adjustment is append behavior:
-  - old behavior: force `"text + space"`
-  - new behavior: append raw chunk text as received
-- This prevents chunk-join artifacts once the backend switches from word-split fake tokens to real streamed fragments.
-
-## Verification Evidence
-
-- Route-level tests prove:
-  - `meta -> token -> done` ordering
-  - token events match the runtime chunk sequence exactly
-  - final answer accumulation persists the joined answer only after successful completion
-  - interrupted streams return `done.message = stream_failed` without persisting a partial assistant answer
+- Streaming remains true streaming.
+- Lightweight multi-turn session behavior remains intact.
+- No user-isolation change is allowed.
+- Any request/response-shape change must be minimal, additive, and justified by implementation need rather than convenience.

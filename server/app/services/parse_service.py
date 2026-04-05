@@ -54,7 +54,7 @@ TIME_RANGE_PATTERN = re.compile(
     r"(?P<start_hour>\d{1,2})"
     r"(?:(?:[:：](?P<start_minute>\d{1,2}))|(?P<start_half>半))?"
     r"(?:点|时)?"
-    r"\s*(?:到|至|\-|~)\s*"
+    r"\s*(?:到|至|\-|~|[Tt][Oo])\s*"
     r"(?P<end_hour>\d{1,2})"
     r"(?:(?:[:：](?P<end_minute>\d{1,2}))|(?P<end_half>半))?"
     r"(?:点|时)?"
@@ -678,6 +678,30 @@ def _combine_runtime_and_fallback_plan(
     return combined
 
 
+def _guard_unsupported_runtime_temporal_updates(
+    base: ScheduleDraft,
+    combined: ParseLLMOutput,
+    fallback: ParseLLMOutput,
+) -> ParseLLMOutput:
+    guarded = combined.model_copy(deep=True)
+
+    if guarded.start_time.action == "set" and fallback.start_time.action != "set":
+        parsed_start = _parse_iso_datetime(guarded.start_time.value)
+        if base.start_time is None or parsed_start != base.start_time:
+            guarded.start_time = _keep_field()
+            if guarded.end_time.action == "set" and fallback.end_time.action != "set":
+                parsed_end = _parse_iso_datetime(guarded.end_time.value)
+                if base.end_time is None or parsed_end != base.end_time:
+                    guarded.end_time = _keep_field()
+
+    if guarded.end_time.action == "set" and fallback.end_time.action != "set":
+        parsed_end = _parse_iso_datetime(guarded.end_time.value)
+        if base.end_time is None or parsed_end != base.end_time:
+            guarded.end_time = _keep_field()
+
+    return guarded
+
+
 def _apply_update_plan(base: ScheduleDraft, plan: ParseLLMOutput) -> ScheduleDraft:
     merged = base.model_copy(deep=True)
 
@@ -775,7 +799,9 @@ class ParseService:
             "as a likely answer to that pending clarification before treating it as an isolated statement. "
             "When active_follow_up_field is present, prefer mapping a compatible short reply to that field. "
             "Preserve unrelated draft information unless the latest message clearly replaces it. "
-            "Do not fabricate a precise end_time if the user did not provide one."
+            "Do not fabricate a precise start_time or end_time if the user did not provide one. "
+            "If the latest message only describes a day, period, or activity without an explicit clock time, "
+            "leave start_time unchanged or missing instead of defaulting to a precise hour."
         )
         try:
             parsed = await runtime.ainvoke_structured_output(
@@ -799,6 +825,11 @@ class ParseService:
             parsed,
             fallback_plan,
             preferred_fallback_fields=preferred_fallback_fields,
+        )
+        combined_plan = _guard_unsupported_runtime_temporal_updates(
+            base_draft,
+            combined_plan,
+            fallback_plan,
         )
         return _apply_update_plan(base_draft, combined_plan)
 

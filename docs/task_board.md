@@ -1,4 +1,4 @@
-# Progress Tracker (R20 - RAG True Streaming Output)
+# Progress Tracker (R25 - RAG Context Rechunking And Local Time Grounding)
 
 ## Legend
 
@@ -7,39 +7,33 @@
 
 ## Round Rules
 
-- This round stayed limited to true streaming output for the RAG answer path.
-- Retrieval remained in scope only as preserved prerequisite context.
-- Frontend changes stayed minimal and only served correct real-time chunk display.
+- Keep this round scoped to RAG chunking, local-time temporal grounding, and schedule-level answer-context organization.
+- Do not expand into Parse, sync, or frontend redesign work.
+- Preserve true streaming and lightweight multi-turn follow-up behavior.
+- Stay local only; no cloud deployment belongs in this round.
 
-- [x] `P1` Streaming contract and plan refresh
-  - [x] `P1-S1` Confirm the current fake-streaming path in route, service, runtime, and frontend consumption code, and lock the minimum preserved contract for a real-streaming refactor.
-  - [x] `P1-S2` Define the smallest implementation seam for real streaming, answer accumulation, and post-stream persistence without widening scope into RAG product redesign.
-  - `done_when`: the active docs clearly define the real-streaming target, preserved SSE contract, storage timing boundary, and minimal frontend alignment for this round.
-  - `verification_plan`: code-informed docs audit against the current RAG route/service/frontend plus docs consistency verification.
+- [x] `P1` Docs refresh and planning lock
+  - [x] `P1-S1` Refresh active round docs for R25 and document the exact boundaries.
+  - `done_when`: working_contract, current_state, and task_board are refreshed for R25. Scope, constraints, and verification expectations are documented. Docs consistency check passes.
+  - `verification_plan`: docs audit + `docs_consistency_check.py`.
 
-- [x] `P2` Backend true-streaming RAG path
-  - [x] `P2-S1` Refactor the RAG service seam so retrieval remains precomputed but answer generation can be consumed as an async stream from the runtime.
-  - [x] `P2-S2` Refactor the RAG route to emit SSE `token` events directly from the streaming iterator and send `done` only after stream completion.
-  - `done_when`: backend token events originate from true streaming output rather than a completed answer split afterward.
-  - `verification_plan`: focused backend streaming tests plus route-level SSE verification.
+- [x] `P2` RAG source-text and chunking repair
+  - [x] `P2-S1` Replace raw fixed-width chunk slicing with schedule-aware chunk construction.
+  - [x] `P2-S2` Rebuild indexed schedule text around concise local-time-oriented temporal facts.
+  - `done_when`: one schedule is indexed as a coherent factual unit under normal rebuild settings, and temporal text is no longer dominated by raw UTC-style values or duplicated labels.
+  - `verification_plan`: targeted RAG workflow tests.
 
-- [x] `P3` Answer accumulation and persistence safety
-  - [x] `P3-S1` Accumulate streamed chunks into a final answer buffer during generation.
-  - [x] `P3-S2` Save chat history only after the stream completes successfully, or handle failure explicitly without corrupting history state.
-  - `done_when`: the system can both stream progressively and retain a coherent final answer for persistence.
-  - `verification_plan`: service-level tests for accumulation, completion, and failure handling.
+- [x] `P3` Answer-context consolidation
+  - [x] `P3-S1` Group retrieved evidence by schedule before generation.
+  - [x] `P3-S2` Tighten answer-generation instructions for time-oriented questions.
+  - `done_when`: runtime payloads carry schedule-level candidates instead of repeated fragment snippets, and multi-turn time questions operate on consolidated context.
+  - `verification_plan`: targeted LangChain integration tests.
 
-- [x] `P4` Frontend streaming-consumption alignment
-  - [x] `P4-S1` Adjust the RAG frontend stream consumer only as needed for real chunk append behavior.
-  - [x] `P4-S2` Verify the page still renders `meta / token / done` events correctly and avoids broken spacing or duplicate text.
-  - `done_when`: the RAG page shows progressively arriving content without obvious text-join artifacts.
-  - `verification_plan`: local page sanity check plus frontend build.
+- [x] `P4` Verification
+  - [x] `P4-S1` Run targeted RAG regression tests.
+  - [x] `P4-S2` Run broader backend regression, frontend build verification, and final docs consistency checks.
+  - `done_when`: targeted tests pass, broader backend tests pass, and round docs are moved to terminal state.
+  - `verification_plan`: `docker compose exec api pytest ...` + `docker compose exec frontend npm run build` + docs check.
 
-- [x] `P5` Verification and round acceptance
-  - [x] `P5-S1` Run focused backend tests for true streaming behavior and preserved retrieval/QA flow.
-  - [x] `P5-S2` Run required local build and docs consistency checks, then close the round only if true streaming is evidenced.
-  - `done_when`: real streaming is established end-to-end locally and the preserved RAG contract still holds.
-  - `verification_plan`: backend tests, local frontend validation, build checks, and final docs consistency confirmation.
-
-- `current_phase`: `COMPLETED`
-- `current_step`: `LOCAL BUILD VERIFIED`
+- `current_phase`: `P4`
+- `current_step`: `P4-S2`

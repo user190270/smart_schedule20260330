@@ -208,6 +208,18 @@ function updateCloudBackedRecordFromServer(localRecord: LocalScheduleRecord, clo
   clearConflictState(localRecord);
 }
 
+function reconcileMissingCloudRecord(localRecord: LocalScheduleRecord) {
+  localRecord.cloud_schedule_id = null;
+  localRecord.cloud_user_id = null;
+  localRecord.cloud_updated_at = null;
+  localRecord.allow_rag_indexing = strategyAllowsKnowledge(localRecord.storage_strategy);
+  localRecord.presence = "local_only";
+  localRecord.sync_intent = localRecord.storage_strategy === "local_only" ? "synced" : "pending_create";
+  localRecord.is_deleted = false;
+  localRecord.remove_local_after_push = false;
+  clearConflictState(localRecord);
+}
+
 function resolveAccountScope(record: LocalScheduleRecord, currentAccountId: number | null): LocalScheduleScope {
   if (record.cloud_schedule_id === null) {
     return "device_local";
@@ -389,6 +401,7 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
 
       const next = cloneRecords(this.records);
       const localByCloudId = new Map<number, LocalScheduleRecord>();
+      const pulledCloudIds = new Set<number>();
 
       for (const record of next) {
         if (record.cloud_schedule_id === null) {
@@ -401,6 +414,7 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
       }
 
       for (const cloudRecord of cloudRecords) {
+        pulledCloudIds.add(cloudRecord.id);
         const localRecord = localByCloudId.get(cloudRecord.id);
         const cloudSnapshot = createConflictSnapshotFromCloud(cloudRecord);
 
@@ -455,6 +469,22 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
         }
 
         updateCloudBackedRecordFromServer(localRecord, cloudRecord, currentUserId);
+      }
+
+      for (const localRecord of next) {
+        if (localRecord.cloud_schedule_id === null) {
+          continue;
+        }
+        if (localRecord.is_deleted) {
+          continue;
+        }
+        if (localRecord.cloud_user_id !== null && localRecord.cloud_user_id !== currentUserId) {
+          continue;
+        }
+        if (pulledCloudIds.has(localRecord.cloud_schedule_id)) {
+          continue;
+        }
+        reconcileMissingCloudRecord(localRecord);
       }
 
       await this.persist(next);

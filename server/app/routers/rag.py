@@ -81,6 +81,7 @@ async def stream_answer(
             user_id=user_id,
             query=payload.query,
             top_k=payload.top_k,
+            session_id=payload.session_id,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -91,10 +92,19 @@ async def stream_answer(
         completion_message = "stream_completed"
 
         try:
-            async for chunk in RagService.stream_answer_text(payload.query, prepared.retrieved):
+            async for chunk in RagService.stream_answer_text(
+                payload.query,
+                prepared.answer_candidates,
+                recent_turns=prepared.recent_turns,
+            ):
                 collected_chunks.append(chunk)
                 yield _sse_event("token", {"text": chunk})
-            RagService.finalize_stream_answer(user_id, payload.query, collected_chunks)
+            RagService.finalize_stream_answer(
+                user_id,
+                payload.query,
+                collected_chunks,
+                session_id=prepared.session_id,
+            )
         except RuntimeError:
             completion_message = "stream_failed"
 

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     postgres_password: str = "smart_schedule"
     database_url: str = _default_database_url()
     embedding_dimensions: int = 3072
+    app_timezone: str = "Asia/Shanghai"
     sqlalchemy_echo: bool = False
     jwt_secret_key: str = token_urlsafe(48)
     jwt_access_token_expire_minutes: int = 120

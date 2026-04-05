@@ -1,6 +1,8 @@
 import { api } from "@/api/client";
 import type { ScheduleStorageStrategy } from "@/repositories/local-schedules";
 
+const PARSE_REQUEST_TIMEOUT_MS = 45_000;
+
 export type ParseScheduleDraft = {
   title: string | null;
   start_time: string | null;
@@ -57,7 +59,9 @@ export type ParseSessionDraftPatchRequest = {
 };
 
 export async function createParseSession(payload: ParseSessionCreateRequest): Promise<ParseSessionResponse> {
-  const response = await api.post<ParseSessionResponse>("/parse/sessions", payload);
+  const response = await api.post<ParseSessionResponse>("/parse/sessions", payload, {
+    timeout: PARSE_REQUEST_TIMEOUT_MS
+  });
   return response.data;
 }
 
@@ -65,7 +69,9 @@ export async function continueParseSession(
   sessionId: string,
   payload: ParseSessionMessageRequest
 ): Promise<ParseSessionResponse> {
-  const response = await api.post<ParseSessionResponse>(`/parse/sessions/${sessionId}/messages`, payload);
+  const response = await api.post<ParseSessionResponse>(`/parse/sessions/${sessionId}/messages`, payload, {
+    timeout: PARSE_REQUEST_TIMEOUT_MS
+  });
   return response.data;
 }
 
@@ -73,6 +79,8 @@ export async function patchParseSessionDraft(
   sessionId: string,
   payload: ParseSessionDraftPatchRequest
 ): Promise<ParseSessionResponse> {
-  const response = await api.patch<ParseSessionResponse>(`/parse/sessions/${sessionId}/draft`, payload);
+  const response = await api.patch<ParseSessionResponse>(`/parse/sessions/${sessionId}/draft`, payload, {
+    timeout: PARSE_REQUEST_TIMEOUT_MS
+  });
   return response.data;
 }

@@ -38,14 +38,20 @@ export type RagStreamEvent =
   | { event: "token"; data: { text: string } }
   | { event: "done"; data: { message: string } };
 
-export async function rebuildScheduleChunks(scheduleId: number, chunkSize = 120): Promise<RagChunkBuildResponse> {
+type RagStreamOptions = {
+  topK?: number;
+  sessionId?: string | null;
+  baseUrl?: string;
+};
+
+export async function rebuildScheduleChunks(scheduleId: number, chunkSize = 320): Promise<RagChunkBuildResponse> {
   const response = await api.post<RagChunkBuildResponse>(`/rag/chunks/rebuild/${scheduleId}`, {
     chunk_size: chunkSize
   });
   return response.data;
 }
 
-export async function rebuildAllScheduleChunks(chunkSize = 120): Promise<RagChunkBuildAllResponse> {
+export async function rebuildAllScheduleChunks(chunkSize = 320): Promise<RagChunkBuildAllResponse> {
   const response = await api.post<RagChunkBuildAllResponse>("/rag/chunks/rebuild-all", {
     chunk_size: chunkSize
   });
@@ -63,16 +69,22 @@ export async function retrieveRagContext(query: string, topK = 3): Promise<RagRe
 export async function* streamRagAnswer(
   query: string,
   token: string,
-  topK = 3,
-  baseUrl = api.defaults.baseURL
+  options: RagStreamOptions = {}
 ): AsyncGenerator<RagStreamEvent> {
+  const topK = options.topK ?? 3;
+  const sessionId = options.sessionId?.trim() || undefined;
+  const baseUrl = options.baseUrl ?? api.defaults.baseURL;
   const response = await fetch(`${baseUrl}/rag/answer/stream`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ query, top_k: topK })
+    body: JSON.stringify({
+      query,
+      top_k: topK,
+      ...(sessionId ? { session_id: sessionId } : {})
+    })
   });
   if (!response.ok) {
     throw new Error(`rag stream failed with status ${response.status}`);

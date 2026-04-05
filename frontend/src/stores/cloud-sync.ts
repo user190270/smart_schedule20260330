@@ -229,7 +229,7 @@ export const useCloudSyncStore = defineStore("cloud-sync", {
       }
     },
 
-    async runRebuildKnowledgeBase(chunkSize = 120): Promise<RagChunkBuildAllResponse> {
+    async runRebuildKnowledgeBase(chunkSize = 320): Promise<RagChunkBuildAllResponse> {
       try {
         const response = await rebuildAllScheduleChunks(chunkSize);
         this.rebuildAction = {

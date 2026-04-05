@@ -3,62 +3,57 @@
 ## Read Policy
 
 - Read `docs/working_contract.md`, `docs/current_state.md`, and `docs/task_board.md` first.
-- Read `docs/api_contract.md` for the finalized RAG streaming contract boundary.
-- Read `docs/decision_log.md` only if an older round decision needs explanation.
+- Read `docs/api_contract.md` only if interface implications need clarification.
+- Read `docs/decision_log.md` only if an older RAG tradeoff must be explained.
 
-## Round Context (R20 - RAG True Streaming Output)
+## Round Context (R25 - RAG Context Rechunking And Local Time Grounding)
 
 - `mode`: `TERMINAL`
-- `project_title`: `Smart Schedule MVP - RAG True Streaming Output`
-- `round_target`: `Replace synthetic post-generation SSE token splitting with a true streaming RAG answer path that forwards model chunks as they arrive, while preserving the existing retrieval flow and the frontend-facing meta/token/done contract.`
+- `project_title`: `Smart Schedule MVP - RAG Context Rechunking And Local Time Grounding`
+- `round_target`: `Repair RAG answer quality by replacing raw fixed-width chunking, grounding indexed temporal text in local user-facing time, and consolidating retrieved evidence before generation.`
 
 ## Execution Status
 
-- `current_phase`: `COMPLETED`
-- `current_step`: `LOCAL BUILD VERIFIED`
+- `current_phase`: `P4`
+- `current_step`: `P4-S2`
 - `status`: `completed`
 
-## Implemented Changes
+## Problem Snapshot
 
-- `server/app/services/rag_service.py`
-  - separated retrieval preparation from answer generation
-  - introduced a true streaming answer path backed by `LangChainAiRuntime.astream_text(...)`
-  - accumulated streamed chunks into a final answer buffer
-  - persisted chat history only after successful stream completion
-- `server/app/routers/rag.py`
-  - changed `/api/rag/answer/stream` to forward runtime chunks directly as SSE `token` events
-  - preserved `meta / token / done`
-  - emits `done.message = stream_failed` when upstream streaming fails
-- `frontend/src/views/RagView.vue`
-  - changed answer rendering from artificial `"text + space"` append to raw chunk append
-  - added explicit user-facing warning for interrupted streams
-- tests
-  - added route-level streaming tests proving event order and chunk origin
-  - updated LangChain integration coverage to assert `astream_text(...)` usage on the RAG path
+- RAG currently uses `_to_chunks(...)` to slice cleaned schedule source text by fixed-width characters, which can split one schedule into multiple semantically broken fragments.
+- The current source text contains duplicated bilingual labels plus raw ISO timestamps, which inflates chunk counts and makes retrieval snippets noisy.
+- Retrieved snippets are forwarded to answer generation largely as-is, so the model sees repeated partial fragments instead of clean schedule-level candidates.
+- Time-oriented answers remain unstable because retrieved context can expose UTC-looking timestamps that do not match the local-time view shown elsewhere in the product.
+
+## Plan
+
+### P1 - Docs refresh and boundary lock
+- `P1-S1`: Refresh active docs for R25 and document the chunking / local-time / schedule-level aggregation scope.
+
+### P2 - RAG source-text and chunking repair
+- `P2-S1`: Replace raw fixed-width chunk slicing with schedule-aware chunk construction that keeps a schedule's factual context coherent.
+- `P2-S2`: Rebuild schedule source text around concise local-time-oriented date/time facts instead of duplicated raw UTC-heavy text.
+
+### P3 - Answer-context consolidation
+- `P3-S1`: Consolidate retrieved chunk hits into schedule-level candidates before generation.
+- `P3-S2`: Tighten the answer-generation prompt so time comparisons are performed against supplied structured candidates.
+
+### P4 - Verification
+- `P4-S1`: Add and update targeted RAG tests for chunk counts, local-time grounding, and schedule-level answer payloads.
+- `P4-S2`: Run targeted RAG tests, broad backend regression, frontend build verification, and docs consistency checks.
+
+## Done When
+
+- A normal rebuild of a small schedule set no longer explodes into many arbitrary fixed-width chunks.
+- Indexed schedule text presents user-facing local date/time facts instead of raw UTC-looking temporal strings.
+- Runtime answer payloads are grouped by schedule rather than repeated per-fragment snippet noise.
+- RAG answers to `earliest`, `latest`, `what date`, and `what time` style questions become materially more stable in local verification.
+- True streaming and lightweight multi-turn follow-ups remain intact.
 
 ## Verification Results
 
-- `docker compose exec api pytest tests/test_ai_langchain_integration.py -q`
-  - `5 passed`
-- `docker compose exec api pytest tests/test_rag_workflow.py -q`
-  - `9 passed`
-- `docker compose exec api pytest tests -q`
-  - `53 passed`
-- `docker compose exec frontend npm run build`
-  - passed
-- `GET http://localhost:8000/api/health`
-  - returned `{"status":"ok"}`
-
-## Outcome Against Done-When
-
-- `/api/rag/answer/stream` no longer waits for a full `answer_text` before token emission.
-- backend token events now come from the true streaming runtime iterator.
-- SSE event structure remains coherent as `meta -> token* -> done`.
-- streamed content is accumulated during generation and written after successful completion.
-- frontend chunk append behavior was adjusted for real chunk delivery.
-
-## Notes
-
-- Browser-tool page verification was attempted locally, but the Playwright browser session failed before navigation. The round therefore closes on the basis of backend streaming tests, local API validation, and frontend build verification rather than a completed browser walkthrough.
-- `docker-compose.yml` was temporarily switched to local API/frontend wiring for this round's local verification, then restored.
-- The restored frontend runtime was rechecked through `http://localhost:5173/src/services/runtime-config.ts`, which again shows `VITE_API_BASE_URL = http://43.131.244.210/api`.
+- `docker compose exec api pytest tests/test_rag_workflow.py -q` -> `12 passed`
+- `docker compose exec api pytest tests/test_ai_langchain_integration.py -q` -> `7 passed`
+- `docker compose exec api pytest tests -q` -> `58 passed`
+- `docker compose exec frontend npm run build` -> passed
+- `docs_consistency_check.py --docs-root docs` -> pending rerun after terminal docs update

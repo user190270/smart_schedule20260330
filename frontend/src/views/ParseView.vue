@@ -9,6 +9,18 @@
       <div class="panel-header">
         <van-icon name="chat-o" color="var(--color-primary)" size="20" />
         <h3 class="panel-title">解析会话</h3>
+        <div class="spacer"></div>
+        <van-button
+          plain
+          round
+          type="primary"
+          size="small"
+          icon="plus"
+          :disabled="loading || saving"
+          @click="startNewSession()"
+        >
+          新会话
+        </van-button>
       </div>
 
       <div class="sample-row">
@@ -194,6 +206,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { storeToRefs } from "pinia";
 import { showNotify } from "vant";
 
 import {
@@ -208,6 +221,7 @@ import {
 import type { ScheduleStorageStrategy } from "@/repositories/local-schedules";
 import { useAuthStore } from "@/stores/auth";
 import { useLocalScheduleStore } from "@/stores/local-schedules";
+import { useParseSessionStore, type DraftFieldKey, type DraftFormState } from "@/stores/parse-session";
 import {
   formatScheduleDateTime,
   fromDatetimeLocalValue,
@@ -215,42 +229,23 @@ import {
   toOffsetIsoString
 } from "@/utils/schedule-time";
 
-type DraftFieldKey = "title" | "start_time" | "end_time" | "location" | "remark";
-type DraftFormState = {
-  title: string;
-  start_time: string;
-  end_time: string;
-  location: string;
-  remark: string;
-  storage_strategy: ScheduleStorageStrategy;
-};
-
 const router = useRouter();
 const authStore = useAuthStore();
 const localScheduleStore = useLocalScheduleStore();
+const parseSessionStore = useParseSessionStore();
 
 const loading = ref(false);
 const saving = ref(false);
-const composerText = ref("");
-const sessionId = ref<string | null>(null);
-const sessionState = ref<ParseSessionResponse | null>(null);
-const displayedMessages = ref<ParseAgentMessage[]>([
-  {
-    id: "parse-agent-intro",
-    role: "assistant",
-    content:
-      "先告诉我你的安排，我会把它整理成一张持续更新的日程草稿；缺什么我会继续追问，确认后你再决定如何保存。"
-  }
-]);
-const localToolCalls = ref<ParseAgentToolCall[]>([]);
-const draftForm = ref<DraftFormState | null>(null);
-const manualEdits = ref<Record<DraftFieldKey, boolean>>({
-  title: false,
-  start_time: false,
-  end_time: false,
-  location: false,
-  remark: false
-});
+
+const {
+  sessionId,
+  sessionState,
+  displayedMessages,
+  localToolCalls,
+  draftForm,
+  manualEdits,
+  composerText
+} = storeToRefs(parseSessionStore);
 
 const quickSamples = [
   "明早8点到9点在三饭吃饭",
@@ -320,13 +315,7 @@ function createDraftFormState(): DraftFormState {
 }
 
 function resetManualEdits() {
-  manualEdits.value = {
-    title: false,
-    start_time: false,
-    end_time: false,
-    location: false,
-    remark: false
-  };
+  parseSessionStore.resetManualEditsOnly();
 }
 
 function mapMissingFieldLabel(field: string): string {
@@ -385,6 +374,19 @@ function applySessionResponse(response: ParseSessionResponse, preserveManualFiel
   if (response.draft_visible) {
     mergeDraftFromSession(response.draft, preserveManualFields);
   }
+}
+
+function cancelDraftSync() {
+  if (draftSyncTimer) {
+    clearTimeout(draftSyncTimer);
+    draftSyncTimer = null;
+  }
+  draftSyncPromise = null;
+}
+
+function startNewSession(options?: { preserveComposerText?: boolean }) {
+  cancelDraftSync();
+  parseSessionStore.resetSession(options);
 }
 
 function serializeDraftPatch() {
@@ -573,6 +575,7 @@ async function persistDraft() {
           : "草稿已保存到本地仓；后续可通过 Push / Rebuild 进入云端与知识库。"
     });
 
+    startNewSession();
     await router.push("/schedules");
   } catch (error) {
     showNotify({ type: "danger", message: formatError(error, "保存草稿失败，请稍后重试。") });
@@ -617,6 +620,10 @@ async function persistDraft() {
   margin: 0;
   font-size: var(--font-size-lg);
   font-weight: 600;
+}
+
+.spacer {
+  flex: 1;
 }
 
 .sample-row {

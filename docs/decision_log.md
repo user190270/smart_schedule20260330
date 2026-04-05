@@ -92,3 +92,36 @@
   - `server/app/routers/rag.py` forwards real runtime chunks as `token` events and emits terminal `done` markers.
   - `server/app/services/rag_service.py` accumulates streamed chunks and writes chat history only after successful completion.
   - `frontend/src/views/RagView.vue` appends raw chunk text instead of adding a forced trailing space to each token.
+
+### D-087
+
+- `status`: active
+- `decision`: Parse must treat fallback-detected explicit time signals as the boundary for accepting a newly fabricated `start_time`.
+- `reason`:
+  - The current defect is not missing follow-up support but unsupported model invention, especially defaulting vague future activities to `09:00`.
+  - The existing fallback extractor already defines whether the latest message actually contains time evidence.
+- `impact`:
+  - Parse runtime prompt and post-runtime merge logic must reject unsupported `start_time` inventions.
+  - Follow-up answers that genuinely contain time signals remain valid.
+
+### D-088
+
+- `status`: active
+- `decision`: RAG temporal grounding will be repaired by enriching indexed schedule source text with structured date/time facts instead of changing route contracts or session semantics.
+- `reason`:
+  - The current multi-turn RAG issue comes from weak indexed grounding, not from missing streaming or missing `session_history`.
+  - A source-text enrichment is the smallest fix that strengthens date-aware answers without a frontend or API redesign.
+- `impact`:
+  - `_build_schedule_source_text(...)` must emit structured temporal facts.
+  - Existing SSE and session-history contracts remain unchanged.
+
+### D-089
+
+- `status`: active
+- `decision`: R25 will repair RAG quality by replacing raw fixed-width fragment chunking with schedule-aware chunks and by grouping retrieved evidence at the schedule level before answer generation.
+- `reason`:
+  - The current RAG issue is no longer just missing fields; retrieval now feeds the model repeated fragment noise that makes time reasoning unstable.
+  - Fixing chunking and pre-generation evidence organization is lower risk than changing routes, session semantics, or providers.
+- `impact`:
+  - `server/app/services/rag_service.py` becomes the main execution surface for chunk construction, local-time formatting, retrieval consolidation, and answer payload shaping.
+  - Existing SSE and multi-turn contracts stay intact while answer quality is improved through cleaner context organization.

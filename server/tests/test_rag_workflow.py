@@ -13,6 +13,7 @@ from app.main import app
 from app.models import ChatHistory, KnowledgeBaseState, Schedule, VectorChunk
 from app.models.enums import ScheduleSource
 from app.services.ai_runtime import AiRuntimeError
+from app.services.rag_service import RagService
 from tests.auth_helpers import register_user
 from tests.db_helpers import reset_database
 
@@ -38,6 +39,7 @@ def parse_sse_events(body_text: str) -> list[dict[str, object]]:
 class RagWorkflowTestCase(unittest.TestCase):
     def setUp(self) -> None:
         reset_database()
+        RagService._sessions.clear()
         runtime_patcher = patch("app.services.rag_service.RagService._get_runtime", return_value=None)
         runtime_patcher.start()
         self.addCleanup(runtime_patcher.stop)
@@ -105,6 +107,56 @@ class RagWorkflowTestCase(unittest.TestCase):
             self.assertEqual(kb_state.last_rebuild_status, "success")
             self.assertEqual(kb_state.last_rebuild_schedules_considered, 1)
             self.assertEqual(kb_state.last_rebuild_schedules_indexed, 1)
+
+    def test_rebuild_chunks_include_structured_temporal_fields(self) -> None:
+        response = self.client.post(
+            f"/api/rag/chunks/rebuild/{self.schedule_a_id}",
+            json={"chunk_size": 500},
+            headers=self.headers_a,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with SessionLocal() as db:
+            chunks = list(
+                db.scalars(
+                    select(VectorChunk).where(
+                        VectorChunk.user_id == self.user_a_id,
+                        VectorChunk.schedule_id == self.schedule_a_id,
+                    )
+                ).all()
+            )
+            indexed_text = " ".join(chunk.content for chunk in chunks)
+
+        self.assertIn("title Prepare architecture review notes", indexed_text)
+        self.assertIn("date 2026-03-31", indexed_text)
+        self.assertIn("start 17:00", indexed_text)
+        self.assertIn("end 18:00", indexed_text)
+        self.assertIn("time_range 2026-03-31 17:00 -> 2026-03-31 18:00", indexed_text)
+        self.assertIn("location Room C", indexed_text)
+        self.assertIn("remark Focus on sync and parse workflow robustness.", indexed_text)
+        self.assertNotIn("+00:00", indexed_text)
+
+    def test_rebuild_default_chunk_size_keeps_single_schedule_coherent(self) -> None:
+        response = self.client.post(
+            f"/api/rag/chunks/rebuild/{self.schedule_a_id}",
+            json={},
+            headers=self.headers_a,
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["chunks_created"], 1)
+
+        with SessionLocal() as db:
+            chunks = list(
+                db.scalars(
+                    select(VectorChunk).where(
+                        VectorChunk.user_id == self.user_a_id,
+                        VectorChunk.schedule_id == self.schedule_a_id,
+                    )
+                ).all()
+            )
+
+        self.assertEqual(len(chunks), 1)
 
     def test_rebuild_chunks_respects_user_isolation(self) -> None:
         response = self.client.post(
@@ -313,6 +365,123 @@ class RagWorkflowTestCase(unittest.TestCase):
         with SessionLocal() as db:
             history = list(db.scalars(select(ChatHistory).where(ChatHistory.user_id == self.user_a_id)).all())
             self.assertEqual(history, [])
+
+    def test_stream_answer_reuses_recent_session_history_for_follow_up(self) -> None:
+        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+            return [[round(0.04 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
+
+        async def fake_embed_query(_query: str) -> list[float]:
+            return [0.06] * 3072
+
+        streamed_payloads: list[dict[str, object]] = []
+
+        def fake_astream_text(**kwargs):
+            streamed_payloads.append(kwargs["human_payload"])
+            reply = (
+                "Your first event tomorrow is meeting with your advisor."
+                if len(streamed_payloads) == 1
+                else "It takes place in Room C."
+            )
+
+            async def iterator():
+                yield reply
+
+            return iterator()
+
+        runtime = type("FakeMultiTurnRuntime", (), {})()
+        runtime.aembed_documents = AsyncMock(side_effect=fake_embed_documents)
+        runtime.aembed_query = AsyncMock(side_effect=fake_embed_query)
+        runtime.astream_text = MagicMock(side_effect=fake_astream_text)
+
+        with patch("app.services.rag_service.RagService._get_runtime", return_value=runtime):
+            self.client.post(f"/api/rag/chunks/rebuild/{self.schedule_a_id}", json={"chunk_size": 30}, headers=self.headers_a)
+
+            first_response = self.client.post(
+                "/api/rag/answer/stream",
+                json={
+                    "query": "What is my first event tomorrow?",
+                    "top_k": 3,
+                    "session_id": "rag-session-a",
+                },
+                headers=self.headers_a,
+            )
+            self.assertEqual(first_response.status_code, 200)
+
+            second_response = self.client.post(
+                "/api/rag/answer/stream",
+                json={
+                    "query": "Where is it?",
+                    "top_k": 3,
+                    "session_id": "rag-session-a",
+                },
+                headers=self.headers_a,
+            )
+
+        self.assertEqual(second_response.status_code, 200)
+        second_events = parse_sse_events(second_response.text)
+        self.assertEqual([item["event"] for item in second_events], ["meta", "token", "done"])
+        self.assertEqual(second_events[1]["data"]["text"], "It takes place in Room C.")
+        self.assertEqual(second_events[-1]["data"]["message"], "stream_completed")
+
+        self.assertNotIn("session_history", streamed_payloads[0])
+        self.assertIn("session_history", streamed_payloads[1])
+        self.assertEqual(
+            streamed_payloads[1]["session_history"],
+            [
+                {
+                    "user_query": "What is my first event tomorrow?",
+                    "assistant_answer": "Your first event tomorrow is meeting with your advisor.",
+                }
+            ],
+        )
+        self.assertEqual(streamed_payloads[1]["query"], "Where is it?")
+        second_embed_query = runtime.aembed_query.await_args_list[-1].args[0]
+        self.assertIn("Where is it?", second_embed_query)
+        self.assertIn("What is my first event tomorrow?", second_embed_query)
+        self.assertIn("Your first event tomorrow is meeting with your advisor.", second_embed_query)
+        self.assertEqual(
+            RagService._sessions[(self.user_a_id, "rag-session-a")].turns[-1].assistant_answer,
+            "It takes place in Room C.",
+        )
+
+    def test_stream_answer_same_session_id_does_not_cross_users(self) -> None:
+        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+            return [[round(0.05 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
+
+        streamed_payloads: list[dict[str, object]] = []
+
+        def fake_astream_text(**kwargs):
+            streamed_payloads.append(kwargs["human_payload"])
+
+            async def iterator():
+                yield "Scoped reply."
+
+            return iterator()
+
+        runtime = type("FakeScopedRuntime", (), {})()
+        runtime.aembed_documents = AsyncMock(side_effect=fake_embed_documents)
+        runtime.aembed_query = AsyncMock(return_value=[0.07] * 3072)
+        runtime.astream_text = MagicMock(side_effect=fake_astream_text)
+
+        with patch("app.services.rag_service.RagService._get_runtime", return_value=runtime):
+            self.client.post(f"/api/rag/chunks/rebuild/{self.schedule_a_id}", json={"chunk_size": 30}, headers=self.headers_a)
+            self.client.post(f"/api/rag/chunks/rebuild/{self.schedule_b_id}", json={"chunk_size": 30}, headers=self.headers_b)
+
+            response_a = self.client.post(
+                "/api/rag/answer/stream",
+                json={"query": "What is scheduled?", "top_k": 3, "session_id": "shared-session"},
+                headers=self.headers_a,
+            )
+            response_b = self.client.post(
+                "/api/rag/answer/stream",
+                json={"query": "Where is it?", "top_k": 3, "session_id": "shared-session"},
+                headers=self.headers_b,
+            )
+
+        self.assertEqual(response_a.status_code, 200)
+        self.assertEqual(response_b.status_code, 200)
+        self.assertNotIn("session_history", streamed_payloads[0])
+        self.assertNotIn("session_history", streamed_payloads[1])
 
 
 if __name__ == "__main__":
