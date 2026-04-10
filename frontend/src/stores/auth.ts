@@ -1,6 +1,16 @@
 import { defineStore } from "pinia";
 
-import { fetchMe, login, logout, register, type LoginPayload, type RegisterPayload, type UserProfile } from "@/api/auth";
+import {
+  fetchMe,
+  login,
+  logout,
+  register,
+  updateMe,
+  type LoginPayload,
+  type RegisterPayload,
+  type UpdateProfilePayload,
+  type UserProfile
+} from "@/api/auth";
 import { getStringValue } from "@/services/local-store";
 import { useLocalScheduleStore } from "@/stores/local-schedules";
 
@@ -61,7 +71,13 @@ export const useAuthStore = defineStore("auth", {
     },
     async refreshProfile() {
       this.user = await fetchMe();
-       await this.syncLocalScheduleAccount(this.user);
+      await this.syncLocalScheduleAccount(this.user);
+      this.initialized = true;
+      return this.user;
+    },
+    async updateProfile(payload: UpdateProfilePayload) {
+      this.user = await updateMe(payload);
+      await this.syncLocalScheduleAccount(this.user);
       this.initialized = true;
       return this.user;
     },

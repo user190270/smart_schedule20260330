@@ -11,6 +11,8 @@ export type SyncScheduleRecord = {
   source: ScheduleSource;
   updated_at: string;
   allow_rag_indexing: boolean;
+  email_reminder_enabled: boolean;
+  email_remind_before_minutes: number | null;
   is_deleted: boolean;
 };
 

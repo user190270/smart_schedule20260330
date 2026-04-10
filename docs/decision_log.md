@@ -125,3 +125,15 @@
 - `impact`:
   - `server/app/services/rag_service.py` becomes the main execution surface for chunk construction, local-time formatting, retrieval consolidation, and answer payload shaping.
   - Existing SSE and multi-turn contracts stay intact while answer quality is improved through cleaner context organization.
+
+### D-090
+
+- `status`: active
+- `decision`: Optional cloud email reminders will use additive user/schedule fields plus a persisted reminder table and a lightweight in-process background scanner, rather than changing auth requirements or introducing new infrastructure.
+- `reason`:
+  - The round needs real send scheduling and idempotency, but the user explicitly wants a sidecar capability that does not disturb the existing mainline product flows.
+  - There is no existing worker stack in the repo, and inventing one would expand scope more than necessary for a local-only implementation round.
+- `impact`:
+  - Backend schema changes stay narrowly focused on optional email config, cloud schedule reminder settings, and reminder-send state.
+  - Request paths may recompute reminder records, but actual sending happens off the main request path.
+  - Frontend work remains limited to the smallest settings surface needed to configure and enable the feature.

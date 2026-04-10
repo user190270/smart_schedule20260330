@@ -13,6 +13,8 @@ export type ScheduleRead = {
   source: ScheduleSource;
   updated_at: string;
   allow_rag_indexing: boolean;
+  email_reminder_enabled: boolean;
+  email_remind_before_minutes: number | null;
   is_deleted: boolean;
 };
 
@@ -25,6 +27,8 @@ export type ScheduleCreate = {
   source?: ScheduleSource;
   confirmed_by_user?: boolean;
   allow_rag_indexing?: boolean;
+  email_reminder_enabled?: boolean;
+  email_remind_before_minutes?: number | null;
 };
 
 export type ScheduleUpdate = {
@@ -35,6 +39,8 @@ export type ScheduleUpdate = {
   remark?: string | null;
   source?: ScheduleSource;
   allow_rag_indexing?: boolean;
+  email_reminder_enabled?: boolean;
+  email_remind_before_minutes?: number | null;
   is_deleted?: boolean;
 };
 

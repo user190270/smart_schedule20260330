@@ -7,7 +7,8 @@ from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import User
 from app.models.enums import UserRole
-from app.schemas import AuthLoginRequest, AuthRegisterRequest, AuthTokenResponse, UserPublic
+from app.schemas import AuthLoginRequest, AuthRegisterRequest, AuthTokenResponse, UserProfileUpdateRequest, UserPublic
+from app.services.email_reminder_service import EmailReminderService
 
 
 class AuthService:
@@ -60,3 +61,16 @@ class AuthService:
             access_token=token,
             expires_in=expires_minutes * 60,
         )
+
+    @staticmethod
+    def update_profile(db: Session, user_id: int, payload: UserProfileUpdateRequest) -> User | None:
+        user = AuthService.get_active_user_by_id(db=db, user_id=user_id)
+        if user is None:
+            return None
+
+        user.notification_email = payload.notification_email
+        db.commit()
+        EmailReminderService.sync_user_reminders(db, user.id)
+        db.commit()
+        db.refresh(user)
+        return user

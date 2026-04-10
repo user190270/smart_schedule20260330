@@ -1,39 +1,42 @@
-# Progress Tracker (R25 - RAG Context Rechunking And Local Time Grounding)
+# Progress Tracker (R27 - Optional Cloud Email Reminder Wiring)
 
 ## Legend
 
 - `[x]` Completed
+- `[>]` In progress
 - `[ ]` Pending
 
 ## Round Rules
 
-- Keep this round scoped to RAG chunking, local-time temporal grounding, and schedule-level answer-context organization.
-- Do not expand into Parse, sync, or frontend redesign work.
-- Preserve true streaming and lightweight multi-turn follow-up behavior.
-- Stay local only; no cloud deployment belongs in this round.
+- Keep email reminders optional, default-off, and limited to cloud schedules.
+- Do not add email as a required auth field.
+- Use Brevo HTTP API and do not leak the API key in logs, docs, or commits.
+- Keep sending off the main request path through a lightweight scanner/worker loop.
+- Do not replace or regress the existing mobile local-notification path.
+- Stay local only; implementation, tests, and docs closure are required before closing the round.
 
 - [x] `P1` Docs refresh and planning lock
-  - [x] `P1-S1` Refresh active round docs for R25 and document the exact boundaries.
-  - `done_when`: working_contract, current_state, and task_board are refreshed for R25. Scope, constraints, and verification expectations are documented. Docs consistency check passes.
-  - `verification_plan`: docs audit + `docs_consistency_check.py`.
+  - [x] `P1-S1` Refresh active round docs for R27 and lock the optional cloud email reminder boundaries.
+  - `done_when`: working_contract, current_state, task_board, and any needed contract docs describe the new round and docs consistency passes.
+  - `verification_plan`: docs audit + `python skills/coding-agent-loop/scripts/docs_consistency_check.py --docs-root docs`.
 
-- [x] `P2` RAG source-text and chunking repair
-  - [x] `P2-S1` Replace raw fixed-width chunk slicing with schedule-aware chunk construction.
-  - [x] `P2-S2` Rebuild indexed schedule text around concise local-time-oriented temporal facts.
-  - `done_when`: one schedule is indexed as a coherent factual unit under normal rebuild settings, and temporal text is no longer dominated by raw UTC-style values or duplicated labels.
-  - `verification_plan`: targeted RAG workflow tests.
+- [x] `P2` Backend reminder foundation
+  - [x] `P2-S1` Add minimal config, persistence, and API surfaces for user email config, cloud schedule reminder flags, and reminder records.
+  - [x] `P2-S2` Implement Brevo sending and reminder recompute/idempotency rules.
+  - `done_when`: backend surfaces can store optional email settings, cloud schedule reminder settings, and due reminder rows without sending on the request path.
+  - `verification_plan`: targeted backend tests + code inspection of recompute/send paths.
 
-- [x] `P3` Answer-context consolidation
-  - [x] `P3-S1` Group retrieved evidence by schedule before generation.
-  - [x] `P3-S2` Tighten answer-generation instructions for time-oriented questions.
-  - `done_when`: runtime payloads carry schedule-level candidates instead of repeated fragment snippets, and multi-turn time questions operate on consolidated context.
-  - `verification_plan`: targeted LangChain integration tests.
+- [x] `P3` Background scan and minimal frontend entry
+  - [x] `P3-S1` Add a lightweight background scan loop that sends due reminders and records send state safely.
+  - [x] `P3-S2` Add the smallest frontend controls for user email config and cloud schedule reminder opt-in.
+  - `done_when`: a user can configure the email address, enable a reminder on a cloud schedule, and the backend can later send it without blocking CRUD requests.
+  - `verification_plan`: local API/manual path checks + frontend build verification.
 
-- [x] `P4` Verification
-  - [x] `P4-S1` Run targeted RAG regression tests.
-  - [x] `P4-S2` Run broader backend regression, frontend build verification, and final docs consistency checks.
-  - `done_when`: targeted tests pass, broader backend tests pass, and round docs are moved to terminal state.
-  - `verification_plan`: `docker compose exec api pytest ...` + `docker compose exec frontend npm run build` + docs check.
+- [x] `P4` Verification and closeout
+  - [x] `P4-S1` Add or update tests for email config, enablement, due-send, reschedule, disable/delete stop, and duplicate-scan idempotency.
+  - [x] `P4-S2` Run regression/build/docs checks and document remaining validation limits.
+  - `done_when`: targeted tests plus regression/build/docs checks all pass and remaining risks are explicitly recorded.
+  - `verification_plan`: `docker compose exec api pytest ...`, `docker compose exec frontend npm run build`, and docs consistency.
 
 - `current_phase`: `P4`
 - `current_step`: `P4-S2`

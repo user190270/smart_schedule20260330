@@ -44,6 +44,16 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-gemini-2.5-flash}
       LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-gemini-embedding-001}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-}
+      MAIL_API_KEY: ${MAIL_API_KEY:-}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Smart Schedule}
+      MAIL_SCAN_ENABLED: ${MAIL_SCAN_ENABLED:-true}
+      MAIL_SCAN_INTERVAL_SECONDS: ${MAIL_SCAN_INTERVAL_SECONDS:-30}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,api,frontend}
     ports:
       - "8000:8000"
     command: >

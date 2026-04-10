@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import KnowledgeBaseState, Schedule, VectorChunk
 from app.schemas import SyncPushRequest, SyncPushResultItem, SyncStatusResponse
+from app.services.email_reminder_service import EmailReminderService
 
 
 def _as_utc(dt: datetime) -> datetime:
@@ -20,6 +21,7 @@ class SyncService:
     @staticmethod
     def push_schedules(db: Session, user_id: int, payload: SyncPushRequest) -> list[SyncPushResultItem]:
         results: list[SyncPushResultItem] = []
+        affected_schedule_ids: set[int] = set()
 
         for record in payload.records:
             existing_for_user: Schedule | None = None
@@ -52,10 +54,13 @@ class SyncService:
                     source=record.source,
                     updated_at=incoming_updated_at,
                     allow_rag_indexing=record.allow_rag_indexing,
+                    email_reminder_enabled=record.email_reminder_enabled,
+                    email_remind_before_minutes=record.email_remind_before_minutes,
                     is_deleted=record.is_deleted,
                 )
                 db.add(created)
                 db.flush()
+                affected_schedule_ids.add(created.id)
                 results.append(SyncPushResultItem(schedule_id=created.id, status="created"))
                 continue
 
@@ -77,11 +82,18 @@ class SyncService:
             existing_for_user.remark = record.remark
             existing_for_user.source = record.source
             existing_for_user.allow_rag_indexing = record.allow_rag_indexing
+            existing_for_user.email_reminder_enabled = record.email_reminder_enabled
+            existing_for_user.email_remind_before_minutes = record.email_remind_before_minutes
             existing_for_user.is_deleted = record.is_deleted
             existing_for_user.updated_at = incoming_updated_at
+            affected_schedule_ids.add(existing_for_user.id)
             results.append(SyncPushResultItem(schedule_id=existing_for_user.id, status="updated"))
 
         db.commit()
+        for schedule_id in affected_schedule_ids:
+            EmailReminderService.sync_schedule_by_id(db, schedule_id)
+        if affected_schedule_ids:
+            db.commit()
         return results
 
     @staticmethod

@@ -21,6 +21,7 @@ class User(Base):
         default=UserRole.USER,
     )
     daily_token_usage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notification_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     last_reset_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -32,4 +33,5 @@ class User(Base):
     vector_chunks: Mapped[list["VectorChunk"]] = relationship(back_populates="user")
     chat_history: Mapped[list["ChatHistory"]] = relationship(back_populates="user")
     knowledge_base_state: Mapped["KnowledgeBaseState | None"] = relationship(back_populates="user")
+    email_reminders: Mapped[list["EmailReminder"]] = relationship(back_populates="user")
 

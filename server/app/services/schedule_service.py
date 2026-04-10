@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import Schedule
 from app.models.enums import ScheduleSource
 from app.schemas import ScheduleCreate, ScheduleUpdate
+from app.services.email_reminder_service import EmailReminderService
 
 
 class ScheduleService:
@@ -25,8 +26,12 @@ class ScheduleService:
             remark=payload.remark,
             source=payload.source,
             allow_rag_indexing=payload.allow_rag_indexing,
+            email_reminder_enabled=payload.email_reminder_enabled,
+            email_remind_before_minutes=payload.email_remind_before_minutes,
         )
         db.add(schedule)
+        db.commit()
+        EmailReminderService.sync_schedule_reminder(db, schedule)
         db.commit()
         db.refresh(schedule)
         return schedule
@@ -67,6 +72,8 @@ class ScheduleService:
 
         schedule.updated_at = datetime.now(timezone.utc)
         db.commit()
+        EmailReminderService.sync_schedule_reminder(db, schedule)
+        db.commit()
         db.refresh(schedule)
         return schedule
 
@@ -78,5 +85,7 @@ class ScheduleService:
 
         schedule.is_deleted = True
         schedule.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        EmailReminderService.sync_schedule_reminder(db, schedule)
         db.commit()
         return True

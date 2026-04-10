@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_chat_model: str | None = "gemini-2.5-flash"
     llm_embedding_model: str | None = "gemini-embedding-001"
+    mail_provider: str | None = None
+    mail_api_key: str | None = None
+    mail_from_address: str | None = None
+    mail_from_name: str = "Smart Schedule"
+    mail_scan_enabled: bool = True
+    mail_scan_interval_seconds: int = 30
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
@@ -73,6 +79,13 @@ class Settings(BaseSettings):
     def validate_embedding_dimensions(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("embedding_dimensions must be greater than 0")
+        return value
+
+    @field_validator("mail_scan_interval_seconds")
+    @classmethod
+    def validate_mail_scan_interval_seconds(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("mail_scan_interval_seconds must be greater than 0")
         return value
 
     @field_validator("cors_allow_origins", mode="before")

@@ -44,8 +44,11 @@ class Schedule(Base):
         onupdate=func.now(),
     )
     allow_rag_indexing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    email_reminder_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    email_remind_before_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     user: Mapped["User"] = relationship(back_populates="schedules")
     vector_chunks: Mapped[list["VectorChunk"]] = relationship(back_populates="schedule")
+    email_reminder: Mapped["EmailReminder | None"] = relationship(back_populates="schedule")
 

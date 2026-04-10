@@ -23,6 +23,8 @@ export type ConflictSnapshot = {
   source: ScheduleSource;
   updated_at: string;
   allow_rag_indexing: boolean;
+  email_reminder_enabled: boolean;
+  email_remind_before_minutes: number | null;
 };
 
 export type LocalScheduleRecord = {
@@ -38,6 +40,8 @@ export type LocalScheduleRecord = {
   updated_at: string;
   cloud_updated_at: string | null;
   allow_rag_indexing: boolean;
+  email_reminder_enabled: boolean;
+  email_remind_before_minutes: number | null;
   is_deleted: boolean;
   presence: SchedulePresence;
   sync_intent: ScheduleSyncIntent;
@@ -60,6 +64,8 @@ export type LocalScheduleDraft = {
   remark?: string | null;
   source?: ScheduleSource;
   storage_strategy?: ScheduleStorageStrategy;
+  email_reminder_enabled?: boolean;
+  email_remind_before_minutes?: number | null;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -136,7 +142,9 @@ function normalizeConflictSnapshot(value: unknown): ConflictSnapshot | null {
     remark: asNullableString(value.remark),
     source: asSource(value.source),
     updated_at: updatedAt,
-    allow_rag_indexing: value.allow_rag_indexing === true
+    allow_rag_indexing: value.allow_rag_indexing === true,
+    email_reminder_enabled: value.email_reminder_enabled === true,
+    email_remind_before_minutes: asNullableNumber(value.email_remind_before_minutes)
   };
 }
 
@@ -181,6 +189,8 @@ function normalizeRecord(value: unknown): LocalScheduleRecord | null {
     updated_at: updatedAt,
     cloud_updated_at: asNullableString(value.cloud_updated_at),
     allow_rag_indexing: value.allow_rag_indexing === true,
+    email_reminder_enabled: value.email_reminder_enabled === true,
+    email_remind_before_minutes: asNullableNumber(value.email_remind_before_minutes),
     is_deleted: isDeleted,
     presence: asPresence(value.presence),
     sync_intent: asSyncIntent(value.sync_intent ?? value.sync_state, cloudScheduleId, isDeleted),
@@ -232,7 +242,9 @@ export function createConflictSnapshotFromCloud(cloudRecord: ScheduleRead): Conf
     remark: cloudRecord.remark,
     source: cloudRecord.source,
     updated_at: cloudRecord.updated_at,
-    allow_rag_indexing: cloudRecord.allow_rag_indexing
+    allow_rag_indexing: cloudRecord.allow_rag_indexing,
+    email_reminder_enabled: cloudRecord.email_reminder_enabled,
+    email_remind_before_minutes: cloudRecord.email_remind_before_minutes
   };
 }
 
@@ -251,6 +263,8 @@ export function buildNewLocalScheduleRecord(draft: LocalScheduleDraft): LocalSch
     updated_at: nowIso(),
     cloud_updated_at: null,
     allow_rag_indexing: storageStrategy === "sync_to_cloud_and_knowledge",
+    email_reminder_enabled: draft.email_reminder_enabled === true,
+    email_remind_before_minutes: draft.email_remind_before_minutes ?? null,
     is_deleted: false,
     presence: "local_only",
     sync_intent: getInitialSyncIntent(storageStrategy),
@@ -275,6 +289,8 @@ export function buildPulledCloudRecord(cloudRecord: ScheduleRead, cloudUserId: n
     updated_at: cloudRecord.updated_at,
     cloud_updated_at: cloudRecord.updated_at,
     allow_rag_indexing: cloudRecord.allow_rag_indexing,
+    email_reminder_enabled: cloudRecord.email_reminder_enabled,
+    email_remind_before_minutes: cloudRecord.email_remind_before_minutes,
     is_deleted: false,
     presence: "local_and_cloud",
     sync_intent: "synced",

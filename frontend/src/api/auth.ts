@@ -5,6 +5,7 @@ export type UserProfile = {
   username: string;
   role: "user" | "admin";
   is_active: boolean;
+  notification_email: string | null;
 };
 
 export type AuthTokenResponse = {
@@ -24,6 +25,10 @@ export type LoginPayload = {
   password: string;
 };
 
+export type UpdateProfilePayload = {
+  notification_email: string | null;
+};
+
 export async function register(payload: RegisterPayload): Promise<AuthTokenResponse> {
   const response = await api.post<AuthTokenResponse>("/auth/register", payload);
   await setAccessToken(response.data.access_token);
@@ -38,6 +43,11 @@ export async function login(payload: LoginPayload): Promise<AuthTokenResponse> {
 
 export async function fetchMe(): Promise<UserProfile> {
   const response = await api.get<UserProfile>("/auth/me");
+  return response.data;
+}
+
+export async function updateMe(payload: UpdateProfilePayload): Promise<UserProfile> {
+  const response = await api.patch<UserProfile>("/auth/me", payload);
   return response.data;
 }
 

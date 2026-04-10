@@ -28,6 +28,43 @@
       </p>
     </section>
 
+    <section v-if="authStore.isAuthenticated" class="panel email-config-panel">
+      <div class="panel-header">
+        <van-icon name="envelop-o" />
+        <h3 class="panel-title">邮件提醒配置</h3>
+      </div>
+      <p class="panel-caption">默认关闭，仅对已同步到云端的日程开放邮件提醒。</p>
+      <van-field
+        v-model="notificationEmail"
+        label-align="top"
+        label="接收邮箱"
+        type="email"
+        placeholder="name@example.com"
+      />
+      <p class="email-help">
+        {{
+          authStore.user?.notification_email
+            ? `当前已保存：${authStore.user.notification_email}`
+            : "尚未保存接收邮箱。"
+        }}
+      </p>
+      <div class="profile-actions">
+        <van-button round size="small" type="primary" :loading="savingProfile" @click="saveNotificationEmail">
+          保存邮箱
+        </van-button>
+        <van-button
+          round
+          size="small"
+          plain
+          :loading="savingProfile"
+          :disabled="!notificationEmail && !authStore.user?.notification_email"
+          @click="clearNotificationEmail"
+        >
+          清空
+        </van-button>
+      </div>
+    </section>
+
     <van-empty
       v-if="visibleSchedules.length === 0"
       image="search"
@@ -151,6 +188,44 @@
             </div>
           </div>
 
+          <div v-if="authStore.isAuthenticated" class="strategy-section reminder-section">
+            <div class="strategy-title">云端邮件提醒</div>
+            <p class="reminder-help">{{ reminderHelpText }}</p>
+            <div class="strategy-options reminder-toggle-row">
+              <button
+                type="button"
+                class="strategy-option"
+                :class="{ active: form.email_reminder_enabled }"
+                :disabled="!canConfigureEmailReminder"
+                @click="setEmailReminderEnabled(true)"
+              >
+                <strong>启用邮件提醒</strong>
+                <span>{{ selectedReminderLeadLabel }}</span>
+              </button>
+              <button
+                type="button"
+                class="strategy-option"
+                :class="{ active: !form.email_reminder_enabled }"
+                @click="setEmailReminderEnabled(false)"
+              >
+                <strong>关闭邮件提醒</strong>
+                <span>默认关闭，不影响移动端本地通知。</span>
+              </button>
+            </div>
+            <div v-if="form.email_reminder_enabled" class="reminder-presets">
+              <button
+                v-for="option in reminderLeadOptions"
+                :key="option.value"
+                type="button"
+                class="reminder-chip"
+                :class="{ active: form.email_remind_before_minutes === option.value }"
+                @click="selectReminderLead(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+
           <div class="editor-actions">
             <van-button round block type="primary" native-type="submit" :loading="saving">保存日程</van-button>
           </div>
@@ -252,7 +327,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { showConfirmDialog, showNotify } from "vant";
 
 import type { LocalScheduleRecord } from "@/repositories/local-schedules";
@@ -275,6 +350,8 @@ const activeFilter = ref<FilterMode>("all");
 const editingLocalId = ref<string | null>(null);
 const deleteTarget = ref<LocalScheduleRecord | null>(null);
 const conflictLocalId = ref<string | null>(null);
+const notificationEmail = ref("");
+const savingProfile = ref(false);
 
 const form = ref({
   title: "",
@@ -282,15 +359,56 @@ const form = ref({
   end_time: "",
   location: "",
   remark: "",
-  storage_strategy: "local_only" as LocalScheduleRecord["storage_strategy"]
+  storage_strategy: "local_only" as LocalScheduleRecord["storage_strategy"],
+  email_reminder_enabled: false,
+  email_remind_before_minutes: 10 as number | null
 });
 
 const storageLabel = computed(() => (localScheduleStore.storageKind === "web" ? "IndexedDB" : "SQLite"));
 const strategyOptions = computed(() => localScheduleStore.storageStrategyOptions());
+const reminderLeadOptions = [
+  { label: "到点提醒", value: 0 },
+  { label: "提前 1 分钟", value: 1 },
+  { label: "提前 5 分钟", value: 5 },
+  { label: "提前 10 分钟", value: 10 },
+  { label: "提前 30 分钟", value: 30 }
+] as const;
 
 const visibleSchedules = computed(() =>
   localScheduleStore.visibleRecords.filter((record) => localScheduleStore.presenceFilterMatches(record, activeFilter.value))
 );
+const editingRecord = computed(() =>
+  editingLocalId.value ? localScheduleStore.getRecordByLocalId(editingLocalId.value) : null
+);
+const hasNotificationEmail = computed(() => Boolean(authStore.user?.notification_email?.trim()));
+const canConfigureEmailReminder = computed(
+  () =>
+    Boolean(
+      authStore.isAuthenticated &&
+        hasNotificationEmail.value &&
+        editingRecord.value?.cloud_schedule_id !== null &&
+        form.value.storage_strategy !== "local_only"
+    )
+);
+const reminderHelpText = computed(() => {
+  if (!authStore.isAuthenticated) {
+    return "登录后才可以配置云端邮件提醒。";
+  }
+  if (!hasNotificationEmail.value) {
+    return "请先保存接收邮箱，然后才能为云端日程开启邮件提醒。";
+  }
+  if (!editingLocalId.value || editingRecord.value?.cloud_schedule_id === null) {
+    return "仅已同步到云端的日程支持邮件提醒。请先保存并完成一次云端同步。";
+  }
+  if (form.value.storage_strategy === "local_only") {
+    return "当前保存策略为仅本地。邮件提醒仅支持已同步到云端的日程。";
+  }
+  return "邮件提醒会按预设提前量发送，不会替代移动端本地通知。";
+});
+const selectedReminderLeadLabel = computed(() => {
+  const selected = reminderLeadOptions.find((option) => option.value === form.value.email_remind_before_minutes);
+  return selected?.label ?? "提前 10 分钟";
+});
 
 const deleteOptions = computed(() => {
   if (!deleteTarget.value) {
@@ -315,6 +433,25 @@ onMounted(async () => {
   }
 });
 
+watch(
+  () => authStore.user?.notification_email,
+  (value) => {
+    notificationEmail.value = value ?? "";
+  },
+  { immediate: true }
+);
+
+watch(
+  canConfigureEmailReminder,
+  (enabled) => {
+    if (!enabled) {
+      form.value.email_reminder_enabled = false;
+      form.value.email_remind_before_minutes = 10;
+    }
+  },
+  { immediate: true }
+);
+
 function openCreate() {
   editingLocalId.value = null;
   form.value = {
@@ -323,7 +460,9 @@ function openCreate() {
     end_time: "",
     location: "",
     remark: "",
-    storage_strategy: authStore.isAuthenticated ? "sync_to_cloud" : "local_only"
+    storage_strategy: authStore.isAuthenticated ? "sync_to_cloud" : "local_only",
+    email_reminder_enabled: false,
+    email_remind_before_minutes: 10
   };
   showEditor.value = true;
 }
@@ -336,9 +475,63 @@ function openEdit(item: LocalScheduleRecord) {
     end_time: item.end_time ?? "",
     location: item.location ?? "",
     remark: item.remark ?? "",
-    storage_strategy: item.storage_strategy
+    storage_strategy: item.storage_strategy,
+    email_reminder_enabled: item.email_reminder_enabled,
+    email_remind_before_minutes: item.email_remind_before_minutes ?? 10
   };
   showEditor.value = true;
+}
+
+function setEmailReminderEnabled(enabled: boolean) {
+  if (!enabled) {
+    form.value.email_reminder_enabled = false;
+    form.value.email_remind_before_minutes = 10;
+    return;
+  }
+
+  if (!canConfigureEmailReminder.value) {
+    showNotify({ type: "warning", message: reminderHelpText.value });
+    return;
+  }
+
+  form.value.email_reminder_enabled = true;
+  if (form.value.email_remind_before_minutes == null) {
+    form.value.email_remind_before_minutes = 10;
+  }
+}
+
+function selectReminderLead(minutes: number) {
+  if (!canConfigureEmailReminder.value) {
+    showNotify({ type: "warning", message: reminderHelpText.value });
+    return;
+  }
+  form.value.email_reminder_enabled = true;
+  form.value.email_remind_before_minutes = minutes;
+}
+
+async function saveNotificationEmail() {
+  if (!authStore.isAuthenticated) {
+    return;
+  }
+
+  savingProfile.value = true;
+  try {
+    const trimmed = notificationEmail.value.trim();
+    await authStore.updateProfile({
+      notification_email: trimmed || null
+    });
+    notificationEmail.value = authStore.user?.notification_email ?? "";
+    showNotify({ type: "success", message: "提醒邮箱已保存。" });
+  } catch (error) {
+    showNotify({ type: "danger", message: formatError(error, "保存提醒邮箱失败。") });
+  } finally {
+    savingProfile.value = false;
+  }
+}
+
+async function clearNotificationEmail() {
+  notificationEmail.value = "";
+  await saveNotificationEmail();
 }
 
 async function submitForm() {
@@ -356,7 +549,9 @@ async function submitForm() {
         end_time: form.value.end_time || null,
         location: form.value.location || null,
         remark: form.value.remark || null,
-        storage_strategy: form.value.storage_strategy
+        storage_strategy: form.value.storage_strategy,
+        email_reminder_enabled: form.value.email_reminder_enabled,
+        email_remind_before_minutes: form.value.email_remind_before_minutes
       });
       showNotify({ type: "success", message: "日程已更新。" });
     } else {
@@ -366,7 +561,9 @@ async function submitForm() {
         end_time: form.value.end_time || null,
         location: form.value.location || null,
         remark: form.value.remark || null,
-        storage_strategy: form.value.storage_strategy
+        storage_strategy: form.value.storage_strategy,
+        email_reminder_enabled: form.value.email_reminder_enabled,
+        email_remind_before_minutes: form.value.email_remind_before_minutes
       });
       showNotify({ type: "success", message: "日程已保存到本地仓。" });
     }
@@ -541,6 +738,26 @@ function formatError(error: unknown, fallback: string): string {
   border-radius: var(--radius-sm);
   padding: var(--spacing-sm);
   line-height: 1.6;
+}
+
+.email-config-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.panel-caption,
+.email-help,
+.reminder-help {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
 }
 
 .empty-state {
@@ -749,6 +966,28 @@ function formatError(error: unknown, fallback: string): string {
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
   line-height: 1.6;
+}
+
+.reminder-presets {
+  margin-top: var(--spacing-sm);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.reminder-chip {
+  border: 1px solid var(--bg-subtle);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  padding: 8px 14px;
+  font-size: var(--font-size-xs);
+}
+
+.reminder-chip.active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .delete-option + .delete-option {

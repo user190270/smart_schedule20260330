@@ -4,13 +4,13 @@
 
 - Read `docs/working_contract.md`, `docs/current_state.md`, and `docs/task_board.md` first.
 - Read `docs/api_contract.md` only if interface implications need clarification.
-- Read `docs/decision_log.md` only if an older RAG tradeoff must be explained.
+- Read `docs/decision_log.md` only if an older tradeoff must be explained.
 
-## Round Context (R25 - RAG Context Rechunking And Local Time Grounding)
+## Round Context (R27 - Optional Cloud Email Reminder Wiring)
 
 - `mode`: `TERMINAL`
-- `project_title`: `Smart Schedule MVP - RAG Context Rechunking And Local Time Grounding`
-- `round_target`: `Repair RAG answer quality by replacing raw fixed-width chunking, grounding indexed temporal text in local user-facing time, and consolidating retrieved evidence before generation.`
+- `project_title`: `Smart Schedule MVP - Optional Cloud Email Reminder Wiring`
+- `round_target`: `Add an optional Brevo-backed cloud email reminder path with minimal user and cloud schedule configuration, separate background sending, and local verification only.`
 
 ## Execution Status
 
@@ -18,42 +18,49 @@
 - `current_step`: `P4-S2`
 - `status`: `completed`
 
-## Problem Snapshot
+## Delivered State
 
-- RAG currently uses `_to_chunks(...)` to slice cleaned schedule source text by fixed-width characters, which can split one schedule into multiple semantically broken fragments.
-- The current source text contains duplicated bilingual labels plus raw ISO timestamps, which inflates chunk counts and makes retrieval snippets noisy.
-- Retrieved snippets are forwarded to answer generation largely as-is, so the model sees repeated partial fragments instead of clean schedule-level candidates.
-- Time-oriented answers remain unstable because retrieved context can expose UTC-looking timestamps that do not match the local-time view shown elsewhere in the product.
+- Optional cloud email reminders now exist as a default-off sidecar feature.
+- Users can save or clear an optional notification email address without changing login/register required fields.
+- Cloud schedules can opt into email reminders with the preset lead-time list `0 / 1 / 5 / 10 / 30`.
+- Reminder scheduling is persisted separately from schedules through `email_reminders`, and due-send work happens on the background scan path rather than inline with request handlers.
+- Schedule create/update/delete and reminder enable/disable flows recompute or deactivate reminder rows, and repeated scans do not resend already-sent reminders.
+- Existing auth, schedule, Parse, RAG, sync, share, and mobile local-notification mainline behavior remains intact in local regression/build verification.
 
 ## Plan
 
 ### P1 - Docs refresh and boundary lock
-- `P1-S1`: Refresh active docs for R25 and document the chunking / local-time / schedule-level aggregation scope.
+- `P1-S1`: Refresh active docs for R27 and lock the optional-email-reminder scope before editing code. Completed.
 
-### P2 - RAG source-text and chunking repair
-- `P2-S1`: Replace raw fixed-width chunk slicing with schedule-aware chunk construction that keeps a schedule's factual context coherent.
-- `P2-S2`: Rebuild schedule source text around concise local-time-oriented date/time facts instead of duplicated raw UTC-heavy text.
+### P2 - Backend reminder foundation
+- `P2-S1`: Add minimal config, schema, and persistence surfaces for optional user email config, cloud schedule reminder flags, and reminder records. Completed.
+- `P2-S2`: Add Brevo HTTP sending plus reminder recompute rules and idempotent reminder record management. Completed.
 
-### P3 - Answer-context consolidation
-- `P3-S1`: Consolidate retrieved chunk hits into schedule-level candidates before generation.
-- `P3-S2`: Tighten the answer-generation prompt so time comparisons are performed against supplied structured candidates.
+### P3 - Background scan and minimal frontend entry
+- `P3-S1`: Add a lightweight background reminder scanner that sends due emails off the main request path. Completed.
+- `P3-S2`: Add the smallest frontend UI needed to edit the user email address and opt cloud schedules into reminder sending. Completed.
 
-### P4 - Verification
-- `P4-S1`: Add and update targeted RAG tests for chunk counts, local-time grounding, and schedule-level answer payloads.
-- `P4-S2`: Run targeted RAG tests, broad backend regression, frontend build verification, and docs consistency checks.
+### P4 - Verification and closeout
+- `P4-S1`: Add targeted tests for email config, reminder creation/recompute/deactivation, due-send behavior, and duplicate-scan idempotency. Completed.
+- `P4-S2`: Run regression/build/docs checks and record remaining validation limits or risks. Completed.
 
 ## Done When
 
-- A normal rebuild of a small schedule set no longer explodes into many arbitrary fixed-width chunks.
-- Indexed schedule text presents user-facing local date/time facts instead of raw UTC-looking temporal strings.
-- Runtime answer payloads are grouped by schedule rather than repeated per-fragment snippet noise.
-- RAG answers to `earliest`, `latest`, `what date`, and `what time` style questions become materially more stable in local verification.
-- True streaming and lightweight multi-turn follow-ups remain intact.
+- A user can configure an optional email address without changing the auth required fields.
+- A cloud schedule can opt into email reminders with one preset lead-time value.
+- Future reminders create or update persisted reminder rows; edits/deletes/disabling deactivate or recompute them correctly.
+- The background scan sends due reminders through Brevo without blocking request handlers.
+- Repeated scans do not resend the same reminder.
+- Existing core auth, schedule, Parse, RAG, sync, share, and mobile local-notification flows still pass regression checks.
 
 ## Verification Results
 
-- `docker compose exec api pytest tests/test_rag_workflow.py -q` -> `12 passed`
-- `docker compose exec api pytest tests/test_ai_langchain_integration.py -q` -> `7 passed`
-- `docker compose exec api pytest tests -q` -> `58 passed`
-- `docker compose exec frontend npm run build` -> passed
-- `docs_consistency_check.py --docs-root docs` -> pending rerun after terminal docs update
+- `docker compose exec api pytest /app/tests -q`: `59 passed`
+- `docker compose exec frontend npm run build`: passed
+- `python skills/coding-agent-loop/scripts/docs_consistency_check.py --docs-root docs`: passed after closeout updates
+
+## Remaining Validation Limits
+
+- Local automated verification covers the backend reminder lifecycle and frontend build, but it does not prove real delivery against a live Brevo request inside the test suite.
+- The Android/Capacitor side of the existing local-notification path was not re-verified on device in this round; the goal here was to ensure the new email reminder sidecar did not regress that path.
+- The minimal frontend gating keeps email reminders meaningful only for cloud-backed schedules; deeper UX polish or richer reminder products remain intentionally out of scope.

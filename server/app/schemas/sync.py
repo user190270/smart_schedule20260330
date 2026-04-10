@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import ScheduleSource
-from app.schemas.schedule import ScheduleRead
+from app.schemas.schedule import ALLOWED_EMAIL_REMINDER_MINUTES, ScheduleRead
 
 
 class SyncScheduleRecord(BaseModel):
@@ -19,12 +19,19 @@ class SyncScheduleRecord(BaseModel):
     source: ScheduleSource = ScheduleSource.MANUAL
     updated_at: datetime
     allow_rag_indexing: bool = False
+    email_reminder_enabled: bool = False
+    email_remind_before_minutes: int | None = None
     is_deleted: bool = False
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "SyncScheduleRecord":
         if self.end_time is not None and self.end_time < self.start_time:
             raise ValueError("end_time must be greater than or equal to start_time")
+        if self.email_reminder_enabled:
+            if self.email_remind_before_minutes not in ALLOWED_EMAIL_REMINDER_MINUTES:
+                raise ValueError("email_remind_before_minutes must be one of 0, 1, 5, 10, 30")
+        elif self.email_remind_before_minutes is not None:
+            raise ValueError("email_remind_before_minutes requires email_reminder_enabled=true")
         return self
 
 

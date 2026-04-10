@@ -1,59 +1,72 @@
-# Working Contract (R25 - RAG Context Rechunking And Local Time Grounding)
+# Working Contract (R27 - Optional Cloud Email Reminder Wiring)
 
 ## Reading Order
 1. `docs/working_contract.md`
 2. `docs/current_state.md`
 3. `docs/task_board.md`
-4. `docs/api_contract.md`
-5. `docs/decision_log.md` only if an older RAG tradeoff needs explanation
+4. `docs/api_contract.md` only if interface boundaries need confirmation
+5. `docs/decision_log.md` only if an older tradeoff must be explained
 
 ## Round Goal
 
-Repair the current RAG answer quality collapse without broadening product scope:
+Land an optional cloud email reminder capability without disturbing the existing core product paths:
 
-1. Stop cutting schedule knowledge into semantically broken fixed-width fragments.
-2. Stop grounding temporal reasoning on UTC-looking text that does not match the user's local-time view.
-3. Stop sending duplicate fragmented schedule snippets straight into answer generation without schedule-level consolidation.
-4. Preserve true streaming and lightweight multi-turn follow-up behavior from R20/R21.
+1. Add an optional user notification email configuration.
+2. Add opt-in cloud schedule email reminder settings using a small preset lead-time list.
+3. Maintain reminder records and send due emails through Brevo on a background scan path.
+4. Keep the feature default-off and isolated from auth, Parse, RAG, sync, share, and mobile local-notification mainline behavior.
 
 ## Scope
 
 ### In Scope
-- `server/app/services/rag_service.py`
-- `server/app/routers/rag.py` only if stream metadata needs the smallest supporting adjustment
-- `server/app/schemas/rag.py` only if a minimal chunking-default adjustment is warranted
-- RAG-related backend tests
+- `server/app/core/config.py`
+- `server/app/main.py`
+- `server/app/models/...` for the minimal user / schedule / reminder persistence changes
+- `server/app/services/...` for reminder recompute, mail sending, and background scanning
+- `server/app/routers/auth.py` and/or a nearby minimal user-settings route if needed
+- `server/app/routers/schedules.py`
+- `server/app/schemas/...` for the smallest contract extensions required by the feature
+- `server/alembic/versions/...`
+- `server/tests/...` covering reminder scheduling, recompute, send, and idempotency
+- minimal frontend wiring for user email config and cloud schedule reminder controls
 - active round docs
-- `docs/decision_log.md` only if the new RAG orchestration tradeoffs need to be made durable
 
 ### Out of Scope
-- Parse service or Parse frontend work
-- sync / Pull reconciliation
-- auth, admin, share
-- RAG frontend redesign beyond the smallest verification aid
-- `skills/`, `prompts/`, `media/`
-- cloud deployment
-- replacing the LLM provider or broad model experimentation
+- changes to registration or login required fields
+- marketing / batch email / template systems
+- Web Push or browser-level scheduled notifications
+- replacing existing mobile local notifications
+- Parse / RAG / share / admin feature expansion unrelated to reminder settings
+- cloud deployment work
 
 ## Constraints
 
-- R20 true streaming (`meta / token / done`) must remain intact.
-- R21 lightweight multi-turn behavior must remain intact.
-- Single-turn RAG must not regress.
-- User isolation by `user_id` must not regress.
-- This round should remain primarily backend-focused.
-- Local verification may temporarily point the frontend to local API, but defaults must be restored before round end.
+- Email reminders must remain optional and default to disabled.
+- Only cloud schedules may enable email reminders.
+- No full reminder product redesign and no custom arbitrary reminder times this round.
+- Reminder lead time stays on a small preset list: `0 / 1 / 5 / 10 / 30` minutes.
+- Do not print or persist the full Brevo API key in logs, docs, test output, or commits.
+- Sending must happen off the main request path through a separate scanner/worker-style loop.
+- Reminder sending must be idempotent; repeated scans must not resend the same reminder.
+- Schedule edits, deletes, or reminder disablement must deactivate or recompute outstanding reminder rows correctly.
+- Existing auth, schedule CRUD, Parse, RAG, sync, share, and mobile local-notification flows must not regress.
 
-## RAG Repair Strategy
+## Minimal Delivery Strategy
 
-- Replace raw fixed-width character chunking with schedule-aware chunking that keeps one schedule's factual context semantically coherent.
-- Rebuild indexed schedule text around user-facing local-time facts instead of raw UTC-looking timestamps.
-- Before answer generation, merge retrieved chunk hits into schedule-level candidates so the model sees deduplicated schedule facts rather than repeated fragments.
-- Strengthen the answer-generation prompt so time-comparison questions (`earliest`, `latest`, `what date`, `what time`) are answered by comparing the supplied structured candidates instead of free-form extrapolation.
+- Treat the user email address as an optional profile setting, not an auth requirement.
+- Treat cloud schedule reminder configuration as two additive fields:
+  - email reminders enabled
+  - reminder lead minutes
+- Persist reminder executions separately from schedules so due-send state stays explicit and idempotent.
+- Recompute reminder rows when cloud schedules are created, updated, deleted, or have reminder settings changed.
+- Use a lightweight in-process background scan loop for local development/testing rather than inventing a new infrastructure stack.
+- Keep the frontend surface intentionally small: enough to configure an email address and toggle cloud reminder settings on a schedule, nothing more.
 
 ## Verification Strategy
 
-- Prove that rebuild results no longer explode a small schedule set into many arbitrary fragments under normal chunk-size settings.
-- Prove that indexed content includes local-time-oriented date/time text.
-- Prove that answer-generation payloads are grouped at the schedule level before being sent to the runtime.
-- Re-run targeted RAG tests plus broad backend regression and frontend build verification.
+- Prove the user email config path works without changing login/register requirements.
+- Prove enabling a reminder for a future cloud schedule creates a due reminder record.
+- Prove edits reschedule the reminder, deletes/disablement stop it, and repeated scans do not resend it.
+- Run targeted backend tests plus existing core regression tests.
+- Run frontend build verification with `docker compose exec frontend npm run build`.
+- Run `python skills/coding-agent-loop/scripts/docs_consistency_check.py --docs-root docs` before closing the round.

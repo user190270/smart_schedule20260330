@@ -17,6 +17,7 @@ import {
   type ScheduleSyncIntent
 } from "@/repositories/local-schedules";
 import type { StoreKind } from "@/services/local-store";
+import { cancelScheduleReminder, syncScheduleReminder } from "@/services/notification";
 
 type EditableScheduleInput = {
   title: string;
@@ -26,6 +27,8 @@ type EditableScheduleInput = {
   remark?: string | null;
   source?: ScheduleSource;
   storage_strategy?: ScheduleStorageStrategy;
+  email_reminder_enabled?: boolean;
+  email_remind_before_minutes?: number | null;
 };
 
 type PushPlan = {
@@ -87,7 +90,38 @@ function strategyFromKnowledgeFlag(allowRagIndexing: boolean): ScheduleStorageSt
   return allowRagIndexing ? "sync_to_cloud_and_knowledge" : "sync_to_cloud";
 }
 
-function hasEditableChanges(previous: LocalScheduleRecord, input: EditableScheduleInput, nextStrategy: ScheduleStorageStrategy) {
+function sanitizeEmailReminderConfig(
+  cloudScheduleId: number | null,
+  strategy: ScheduleStorageStrategy,
+  enabled: boolean | undefined,
+  remindBeforeMinutes: number | null | undefined
+) {
+  const allowedMinutes = new Set([0, 1, 5, 10, 30]);
+  if (cloudScheduleId === null || strategy === "local_only" || enabled !== true) {
+    return {
+      email_reminder_enabled: false,
+      email_remind_before_minutes: null
+    };
+  }
+
+  const normalizedMinutes =
+    typeof remindBeforeMinutes === "number" && allowedMinutes.has(remindBeforeMinutes)
+      ? remindBeforeMinutes
+      : 10;
+
+  return {
+    email_reminder_enabled: true,
+    email_remind_before_minutes: normalizedMinutes
+  };
+}
+
+function hasEditableChanges(
+  previous: LocalScheduleRecord,
+  input: EditableScheduleInput,
+  nextStrategy: ScheduleStorageStrategy,
+  nextReminderEnabled: boolean,
+  nextReminderLeadMinutes: number | null
+) {
   return (
     previous.title !== input.title ||
     previous.start_time !== input.start_time ||
@@ -95,8 +129,20 @@ function hasEditableChanges(previous: LocalScheduleRecord, input: EditableSchedu
     previous.location !== (input.location ?? null) ||
     previous.remark !== (input.remark ?? null) ||
     previous.source !== (input.source ?? previous.source) ||
-    previous.storage_strategy !== nextStrategy
+    previous.storage_strategy !== nextStrategy ||
+    previous.email_reminder_enabled !== nextReminderEnabled ||
+    previous.email_remind_before_minutes !== nextReminderLeadMinutes
   );
+}
+
+function toScheduleReminderTarget(record: LocalScheduleRecord) {
+  return {
+    localId: record.local_id,
+    title: record.title,
+    startTime: record.start_time,
+    location: record.location,
+    isDeleted: record.is_deleted
+  };
 }
 
 function syncIntentLabel(intent: ScheduleSyncIntent): string {
@@ -147,6 +193,8 @@ function toPushRecord(record: LocalScheduleRecord): SyncScheduleRecord {
     source: record.source,
     updated_at: record.updated_at,
     allow_rag_indexing: strategyAllowsKnowledge(record.storage_strategy),
+    email_reminder_enabled: record.email_reminder_enabled,
+    email_remind_before_minutes: record.email_remind_before_minutes,
     is_deleted: record.sync_intent === "pending_delete_cloud"
   };
 }
@@ -165,7 +213,9 @@ function snapshotFromRecord(record: LocalScheduleRecord): ConflictSnapshot {
     remark: record.remark,
     source: record.source,
     updated_at: record.updated_at,
-    allow_rag_indexing: record.allow_rag_indexing
+    allow_rag_indexing: record.allow_rag_indexing,
+    email_reminder_enabled: record.email_reminder_enabled,
+    email_remind_before_minutes: record.email_remind_before_minutes
   };
 }
 
@@ -200,6 +250,8 @@ function updateCloudBackedRecordFromServer(localRecord: LocalScheduleRecord, clo
   localRecord.updated_at = cloudRecord.updated_at;
   localRecord.cloud_updated_at = cloudRecord.updated_at;
   localRecord.allow_rag_indexing = cloudRecord.allow_rag_indexing;
+  localRecord.email_reminder_enabled = cloudRecord.email_reminder_enabled;
+  localRecord.email_remind_before_minutes = cloudRecord.email_remind_before_minutes;
   localRecord.presence = "local_and_cloud";
   localRecord.sync_intent = "synced";
   localRecord.is_deleted = false;
@@ -213,6 +265,8 @@ function reconcileMissingCloudRecord(localRecord: LocalScheduleRecord) {
   localRecord.cloud_user_id = null;
   localRecord.cloud_updated_at = null;
   localRecord.allow_rag_indexing = strategyAllowsKnowledge(localRecord.storage_strategy);
+  localRecord.email_reminder_enabled = false;
+  localRecord.email_remind_before_minutes = null;
   localRecord.presence = "local_only";
   localRecord.sync_intent = localRecord.storage_strategy === "local_only" ? "synced" : "pending_create";
   localRecord.is_deleted = false;
@@ -339,6 +393,12 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
     async createSchedule(input: EditableScheduleInput) {
       await this.initialize();
       const storageStrategy = sanitizeStrategy(input.storage_strategy);
+      const reminderConfig = sanitizeEmailReminderConfig(
+        null,
+        storageStrategy,
+        input.email_reminder_enabled,
+        input.email_remind_before_minutes
+      );
       const next = [
         buildNewLocalScheduleRecord({
           title: input.title,
@@ -347,11 +407,14 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
           location: input.location ?? null,
           remark: input.remark ?? null,
           source: input.source,
-          storage_strategy: storageStrategy
+          storage_strategy: storageStrategy,
+          email_reminder_enabled: reminderConfig.email_reminder_enabled,
+          email_remind_before_minutes: reminderConfig.email_remind_before_minutes
         }),
         ...cloneRecords(this.records)
       ];
       await this.persist(next);
+      await syncScheduleReminder(toScheduleReminderTarget(next[0]));
       return next[0];
     },
 
@@ -364,7 +427,19 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
       }
 
       const nextStrategy = sanitizeStrategy(input.storage_strategy ?? target.storage_strategy);
-      const changed = hasEditableChanges(target, input, nextStrategy);
+      const reminderConfig = sanitizeEmailReminderConfig(
+        target.cloud_schedule_id,
+        nextStrategy,
+        input.email_reminder_enabled ?? target.email_reminder_enabled,
+        input.email_remind_before_minutes ?? target.email_remind_before_minutes
+      );
+      const changed = hasEditableChanges(
+        target,
+        input,
+        nextStrategy,
+        reminderConfig.email_reminder_enabled,
+        reminderConfig.email_remind_before_minutes
+      );
 
       target.title = input.title;
       target.start_time = input.start_time;
@@ -374,6 +449,8 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
       target.source = input.source ?? target.source;
       target.storage_strategy = nextStrategy;
       target.allow_rag_indexing = strategyAllowsKnowledge(nextStrategy);
+      target.email_reminder_enabled = reminderConfig.email_reminder_enabled;
+      target.email_remind_before_minutes = reminderConfig.email_remind_before_minutes;
       target.updated_at = nowIso();
       target.is_deleted = false;
       target.remove_local_after_push = false;
@@ -392,6 +469,7 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
       }
 
       await this.persist(next);
+      await syncScheduleReminder(toScheduleReminderTarget(target));
       return target;
     },
 
@@ -433,6 +511,8 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
           localRecord.cloud_user_id = null;
           localRecord.cloud_updated_at = null;
           localRecord.allow_rag_indexing = false;
+          localRecord.email_reminder_enabled = false;
+          localRecord.email_remind_before_minutes = null;
           localRecord.presence = "local_only";
           localRecord.storage_strategy = "local_only";
           localRecord.sync_intent = localRecord.sync_intent === "conflict" ? "conflict" : "synced";
@@ -495,6 +575,7 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
       await this.initialize();
       const next = this.records.filter((record) => record.local_id !== localId);
       await this.persist(next);
+      await cancelScheduleReminder(localId);
     },
 
     async markDeleteCloud(localId: string, removeLocalAfterPush = false) {
@@ -520,6 +601,9 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
       }
 
       await this.persist(next);
+      if (target.is_deleted) {
+        await cancelScheduleReminder(localId);
+      }
       return target;
     },
 
@@ -578,6 +662,8 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
             target.sync_intent = "synced";
             target.storage_strategy = "local_only";
             target.allow_rag_indexing = false;
+            target.email_reminder_enabled = false;
+            target.email_remind_before_minutes = null;
             target.is_deleted = false;
             target.remove_local_after_push = false;
             clearConflictState(target);
@@ -713,6 +799,8 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
         target.updated_at = target.conflict_snapshot.updated_at;
         target.cloud_updated_at = target.conflict_snapshot.updated_at;
         target.allow_rag_indexing = target.conflict_snapshot.allow_rag_indexing;
+        target.email_reminder_enabled = target.conflict_snapshot.email_reminder_enabled;
+        target.email_remind_before_minutes = target.conflict_snapshot.email_remind_before_minutes;
         target.storage_strategy = strategyFromKnowledgeFlag(target.conflict_snapshot.allow_rag_indexing);
         target.sync_intent = "synced";
         target.presence = "local_and_cloud";
@@ -723,11 +811,19 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
         }
         clearConflictState(target);
       } else {
+        const reminderConfig = sanitizeEmailReminderConfig(
+          target.cloud_schedule_id,
+          target.storage_strategy,
+          target.email_reminder_enabled,
+          target.email_remind_before_minutes
+        );
         target.updated_at = nowIso();
         target.sync_intent = "pending_update";
         target.presence = "local_and_cloud";
         target.is_deleted = false;
         target.remove_local_after_push = false;
+        target.email_reminder_enabled = reminderConfig.email_reminder_enabled;
+        target.email_remind_before_minutes = reminderConfig.email_remind_before_minutes;
         if (this.currentAccountId !== null && target.cloud_schedule_id !== null) {
           target.cloud_user_id = this.currentAccountId;
         }
@@ -739,6 +835,7 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
       }
 
       await this.persist(next);
+      await syncScheduleReminder(toScheduleReminderTarget(target));
       return target;
     },
 
