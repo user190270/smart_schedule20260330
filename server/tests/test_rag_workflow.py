@@ -285,7 +285,7 @@ class RagWorkflowTestCase(unittest.TestCase):
             self.assertEqual(history_user_b, [])
 
     def test_stream_answer_forwards_runtime_chunks_in_order(self) -> None:
-        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+        async def fake_embed_documents(texts: list[str], **kwargs) -> list[list[float]]:
             return [[round(0.02 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
 
         def fake_astream_text(**kwargs):
@@ -331,7 +331,7 @@ class RagWorkflowTestCase(unittest.TestCase):
             self.assertEqual(history[-1].content, "Alpha Beta + Gamma")
 
     def test_stream_answer_emits_done_on_runtime_failure_without_persisting_partial_history(self) -> None:
-        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+        async def fake_embed_documents(texts: list[str], **kwargs) -> list[list[float]]:
             return [[round(0.03 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
 
         def fake_astream_text(**kwargs):
@@ -367,10 +367,10 @@ class RagWorkflowTestCase(unittest.TestCase):
             self.assertEqual(history, [])
 
     def test_stream_answer_reuses_recent_session_history_for_follow_up(self) -> None:
-        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+        async def fake_embed_documents(texts: list[str], **kwargs) -> list[list[float]]:
             return [[round(0.04 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
 
-        async def fake_embed_query(_query: str) -> list[float]:
+        async def fake_embed_query(_query: str, **kwargs) -> list[float]:
             return [0.06] * 3072
 
         streamed_payloads: list[dict[str, object]] = []
@@ -445,7 +445,7 @@ class RagWorkflowTestCase(unittest.TestCase):
         )
 
     def test_stream_answer_same_session_id_does_not_cross_users(self) -> None:
-        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+        async def fake_embed_documents(texts: list[str], **kwargs) -> list[list[float]]:
             return [[round(0.05 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
 
         streamed_payloads: list[dict[str, object]] = []
