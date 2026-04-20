@@ -1,7 +1,6 @@
 import { defineStore } from "pinia";
 
 import {
-  demoUpgradeMe,
   fetchMe,
   login,
   logout,
@@ -9,7 +8,6 @@ import {
   updateMe,
   type LoginPayload,
   type RegisterPayload,
-  type SubscriptionTier,
   type UpdateProfilePayload,
   type UserProfile
 } from "@/api/auth";
@@ -79,12 +77,6 @@ export const useAuthStore = defineStore("auth", {
     },
     async updateProfile(payload: UpdateProfilePayload) {
       this.user = await updateMe(payload);
-      await this.syncLocalScheduleAccount(this.user);
-      this.initialized = true;
-      return this.user;
-    },
-    async demoUpgrade(targetTier?: SubscriptionTier) {
-      this.user = await demoUpgradeMe(targetTier);
       await this.syncLocalScheduleAccount(this.user);
       this.initialized = true;
       return this.user;

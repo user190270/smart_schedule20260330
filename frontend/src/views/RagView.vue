@@ -127,7 +127,6 @@ import { showNotify } from "vant";
 
 import { getAccessToken } from "@/api/client";
 import { retrieveRagContext, streamRagAnswer, type RagRetrievedChunk } from "@/api/rag";
-import { extractApiErrorMessage } from "@/services/api-errors";
 import { useAuthStore } from "@/stores/auth";
 import { useCloudSyncStore } from "@/stores/cloud-sync";
 
@@ -399,7 +398,16 @@ function formatTime(value: string | null): string {
 }
 
 function formatError(error: unknown, fallback: string): string {
-  return extractApiErrorMessage(error, fallback);
+  if (error && typeof error === "object" && "response" in error) {
+    const maybeResponse = (error as { response?: { data?: { detail?: string } } }).response;
+    if (maybeResponse?.data?.detail) {
+      return maybeResponse.data.detail;
+    }
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
 }
 </script>
 

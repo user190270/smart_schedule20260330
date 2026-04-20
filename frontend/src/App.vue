@@ -158,7 +158,6 @@ function openAdmin() {
 }
 .mobile-header-actions {
   display: flex;
-  gap: var(--spacing-sm);
 }
 
 @media (min-width: 1024px) {

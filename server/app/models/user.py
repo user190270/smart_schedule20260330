@@ -6,7 +6,7 @@ from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
-from app.models.enums import SubscriptionTier, UserRole
+from app.models.enums import UserRole
 
 
 class User(Base):
@@ -19,11 +19,6 @@ class User(Base):
         SAEnum(UserRole, name="user_role", native_enum=False),
         nullable=False,
         default=UserRole.USER,
-    )
-    subscription_tier: Mapped[SubscriptionTier] = mapped_column(
-        SAEnum(SubscriptionTier, name="subscription_tier", native_enum=False),
-        nullable=False,
-        default=SubscriptionTier.FREE,
     )
     daily_token_usage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notification_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
@@ -39,5 +34,4 @@ class User(Base):
     chat_history: Mapped[list["ChatHistory"]] = relationship(back_populates="user")
     knowledge_base_state: Mapped["KnowledgeBaseState | None"] = relationship(back_populates="user")
     email_reminders: Mapped[list["EmailReminder"]] = relationship(back_populates="user")
-    ai_usage_events: Mapped[list["AiUsageEvent"]] = relationship(back_populates="user")
 

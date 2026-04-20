@@ -1,5 +1,4 @@
 import { api } from "@/api/client";
-import { buildFetchError } from "@/services/api-errors";
 
 export type RagChunkBuildResponse = {
   schedule_id: number;
@@ -88,7 +87,7 @@ export async function* streamRagAnswer(
     })
   });
   if (!response.ok) {
-    throw await buildFetchError(response, `AI 问答失败（状态码 ${response.status}）。`);
+    throw new Error(`rag stream failed with status ${response.status}`);
   }
   if (!response.body) {
     throw new Error("rag stream has no response body");

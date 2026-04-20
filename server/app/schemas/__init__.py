@@ -1,6 +1,5 @@
 from app.schemas.admin import UserAdminUpdateRequest, UserAdminView
 from app.schemas.auth import AuthLoginRequest, AuthRegisterRequest, AuthTokenResponse, UserProfileUpdateRequest, UserPublic
-from app.schemas.auth import DemoUpgradeRequest
 from app.schemas.parse import (
     ParseAgentMessage,
     ParseAgentToolCall,
@@ -40,7 +39,6 @@ __all__ = [
     "AuthLoginRequest",
     "AuthRegisterRequest",
     "AuthTokenResponse",
-    "DemoUpgradeRequest",
     "UserProfileUpdateRequest",
     "ParseAgentMessage",
     "ParseAgentToolCall",

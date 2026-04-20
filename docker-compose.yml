@@ -50,9 +50,10 @@ services:
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Smart Schedule}
       MAIL_SCAN_ENABLED: ${MAIL_SCAN_ENABLED:-true}
       MAIL_SCAN_INTERVAL_SECONDS: ${MAIL_SCAN_INTERVAL_SECONDS:-30}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,api,frontend}
-    volumes:
-      - ./server:/app
     ports:
       - "8000:8000"
     command: >

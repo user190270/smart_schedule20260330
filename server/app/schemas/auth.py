@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.enums import SubscriptionTier, UserRole
+from app.models.enums import UserRole
 
 
 class UserPublic(BaseModel):
@@ -13,9 +13,6 @@ class UserPublic(BaseModel):
     role: UserRole
     is_active: bool
     notification_email: str | None = None
-    subscription_tier: SubscriptionTier
-    daily_token_usage: int
-    daily_token_limit: int
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -51,7 +48,3 @@ class UserProfileUpdateRequest(BaseModel):
         if "@" not in normalized:
             raise ValueError("notification_email must be a valid email address")
         return normalized
-
-
-class DemoUpgradeRequest(BaseModel):
-    target_tier: SubscriptionTier | None = None
