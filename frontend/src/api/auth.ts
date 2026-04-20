@@ -1,11 +1,16 @@
 import { api, clearAccessToken, setAccessToken } from "@/api/client";
 
+export type SubscriptionTier = "free" | "plus" | "pro";
+
 export type UserProfile = {
   id: number;
   username: string;
   role: "user" | "admin";
   is_active: boolean;
   notification_email: string | null;
+  subscription_tier: SubscriptionTier;
+  daily_token_usage: number;
+  daily_token_limit: number;
 };
 
 export type AuthTokenResponse = {
@@ -48,6 +53,11 @@ export async function fetchMe(): Promise<UserProfile> {
 
 export async function updateMe(payload: UpdateProfilePayload): Promise<UserProfile> {
   const response = await api.patch<UserProfile>("/auth/me", payload);
+  return response.data;
+}
+
+export async function demoUpgradeMe(targetTier?: SubscriptionTier): Promise<UserProfile> {
+  const response = await api.post<UserProfile>("/auth/me/demo-upgrade", targetTier ? { target_tier: targetTier } : {});
   return response.data;
 }
 

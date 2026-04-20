@@ -24,14 +24,14 @@
         </van-form>
       </div>
 
-      <div v-else class="user-profile">
-        <div class="user-avatar">
-          <van-icon name="smile-o" size="32" color="var(--color-primary)" />
-        </div>
-        <div class="user-info">
-          <div class="user-name">{{ authStore.user?.username }}</div>
-          <div class="user-role">{{ authStore.user?.role }}</div>
-        </div>
+        <div v-else class="user-profile">
+          <button type="button" class="user-avatar user-avatar-button" @click="openQuota" aria-label="打开配额管理">
+            <van-icon name="smile-o" size="32" color="var(--color-primary)" />
+          </button>
+          <div class="user-info">
+            <div class="user-name">{{ authStore.user?.username }}</div>
+            <div class="user-role">{{ authStore.user?.role }}</div>
+          </div>
 
         <div class="auth-actions-row">
           <van-button size="small" icon="replay" round @click="refreshMe" :loading="loadingAuth">刷新资料</van-button>
@@ -157,6 +157,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { showNotify } from "vant";
+import { useRouter } from "vue-router";
 
 import { useAppStore } from "@/stores/app";
 import { useAuthStore } from "@/stores/auth";
@@ -167,6 +168,7 @@ const appStore = useAppStore();
 const authStore = useAuthStore();
 const syncStore = useCloudSyncStore();
 const localScheduleStore = useLocalScheduleStore();
+const router = useRouter();
 
 const loadingAuth = ref(false);
 const username = ref("demo_user");
@@ -277,6 +279,13 @@ async function logoutAccount() {
   }
 }
 
+function openQuota() {
+  if (!authStore.isAuthenticated) {
+    return;
+  }
+  void router.push("/quota");
+}
+
 async function runPush() {
   if (!authStore.isAuthenticated) {
     showNotify({ type: "warning", message: "请先登录后再执行 Push。" });
@@ -374,6 +383,18 @@ function formatAction(status: string, message: string | null): string {
 .welcome-section {
   text-align: center;
   padding: var(--spacing-md) 0;
+}
+
+.user-avatar-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.user-avatar-button:focus-visible {
+  outline: 2px solid rgba(30, 136, 229, 0.32);
+  outline-offset: 2px;
 }
 
 .welcome-title {

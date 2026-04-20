@@ -228,6 +228,7 @@ import {
   toDatetimeLocalValue,
   toOffsetIsoString
 } from "@/utils/schedule-time";
+import { extractApiErrorMessage } from "@/services/api-errors";
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -334,16 +335,7 @@ function buildReferenceTime(): string {
 }
 
 function formatError(error: unknown, fallback: string): string {
-  if (error && typeof error === "object" && "response" in error) {
-    const response = (error as { response?: { data?: { detail?: string } } }).response;
-    if (response?.data?.detail) {
-      return response.data.detail;
-    }
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return fallback;
+  return extractApiErrorMessage(error, fallback);
 }
 
 function mergeDraftFromSession(draft: ParseScheduleDraft, preserveManualFields = true) {

@@ -1,3 +1,4 @@
+from app.models.ai_usage_event import AiUsageEvent
 from app.models.base import Base
 from app.models.chat_history import ChatHistory
 from app.models.email_reminder import EmailReminder
@@ -9,6 +10,7 @@ from app.models.vector_chunk import VectorChunk
 
 __all__ = [
     "Base",
+    "AiUsageEvent",
     "User",
     "Schedule",
     "ShareLink",
