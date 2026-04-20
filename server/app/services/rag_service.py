@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -18,7 +18,7 @@ from app.schemas import (
     RagRetrievedChunk,
     RagRetrieveResponse,
 )
-from app.services.ai_runtime import AiRuntimeError, AiRuntimeUnavailable, LangChainAiRuntime
+from app.services.ai_runtime import AiRuntimeError, AiRuntimeUnavailable, LangChainAiRuntime, UsageCallback
 
 
 def _normalize_chunk_text(value: str) -> str:
@@ -226,12 +226,20 @@ class RagService:
         return _pack_segments(RagService._build_schedule_source_segments(schedule), chunk_size=chunk_size)
 
     @staticmethod
-    async def _build_embedding(text_value: str, runtime: LangChainAiRuntime | None) -> list[float]:
+    async def _build_embedding(
+        text_value: str,
+        runtime: LangChainAiRuntime | None,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
+    ) -> list[float]:
         settings = get_settings()
         if runtime is None:
             return _mock_embedding(text_value, dimensions=settings.embedding_dimensions)
         try:
-            return await runtime.aembed_query(text_value)
+            if before_ai_call is not None:
+                before_ai_call()
+            return await runtime.aembed_query(text_value, usage_callback=usage_callback)
         except AiRuntimeError:
             return _mock_embedding(text_value, dimensions=settings.embedding_dimensions)
 
@@ -239,6 +247,9 @@ class RagService:
     async def _build_embeddings(
         texts: Iterable[str],
         runtime: LangChainAiRuntime | None,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
     ) -> list[list[float]]:
         values = list(texts)
         settings = get_settings()
@@ -247,7 +258,9 @@ class RagService:
         if runtime is None:
             return [_mock_embedding(text_value, dimensions=settings.embedding_dimensions) for text_value in values]
         try:
-            return await runtime.aembed_documents(values)
+            if before_ai_call is not None:
+                before_ai_call()
+            return await runtime.aembed_documents(values, usage_callback=usage_callback)
         except AiRuntimeError:
             return [_mock_embedding(text_value, dimensions=settings.embedding_dimensions) for text_value in values]
 
@@ -581,6 +594,9 @@ class RagService:
         user_id: int,
         schedule_id: int,
         chunk_size: int,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
     ) -> RagChunkBuildResponse | None:
         schedule = RagService._load_schedule_snapshot(user_id, schedule_id)
         if schedule is None:
@@ -618,7 +634,12 @@ class RagService:
         runtime = RagService._get_runtime()
 
         try:
-            embeddings = await RagService._build_embeddings(chunks, runtime)
+            embeddings = await RagService._build_embeddings(
+                chunks,
+                runtime,
+                before_ai_call=before_ai_call,
+                usage_callback=usage_callback,
+            )
         except RuntimeError as exc:
             RagService._write_rebuild(
                 user_id=user_id,
@@ -666,6 +687,9 @@ class RagService:
     async def rebuild_chunks_for_user(
         user_id: int,
         chunk_size: int,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
     ) -> RagChunkBuildAllResponse:
         schedules = RagService._load_rebuildable_schedule_snapshots(user_id)
         embedding_dimensions = get_settings().embedding_dimensions
@@ -677,7 +701,12 @@ class RagService:
             plans: list[ChunkWritePlan] = []
             for schedule in schedules:
                 chunks = RagService._build_schedule_chunks(schedule, chunk_size=chunk_size)
-                embeddings = await RagService._build_embeddings(chunks, runtime)
+                embeddings = await RagService._build_embeddings(
+                    chunks,
+                    runtime,
+                    before_ai_call=before_ai_call,
+                    usage_callback=usage_callback,
+                )
                 plans.append(ChunkWritePlan(schedule_id=schedule.id, chunks=chunks, embeddings=embeddings))
         except RuntimeError as exc:
             RagService._write_rebuild(
@@ -734,9 +763,17 @@ class RagService:
         user_id: int,
         query: str,
         top_k: int,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
     ) -> RagRetrieveResponse:
         runtime = RagService._get_runtime()
-        query_embedding = await RagService._build_embedding(query, runtime)
+        query_embedding = await RagService._build_embedding(
+            query,
+            runtime,
+            before_ai_call=before_ai_call,
+            usage_callback=usage_callback,
+        )
         query_vector = "[" + ",".join(f"{value:.6f}" for value in query_embedding) + "]"
         rows = RagService._query_retrieved_rows(user_id, query_vector, top_k)
         results = [
@@ -757,6 +794,8 @@ class RagService:
         retrieved: RagRetrieveResponse,
         *,
         recent_turns: list[RagSessionTurn] | None = None,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
     ) -> str:
         answer_candidates = RagService._build_answer_candidates(user_id, retrieved)
         if not answer_candidates:
@@ -774,6 +813,8 @@ class RagService:
             human_payload["session_history"] = RagService._build_session_history_payload(recent_turns)
 
         try:
+            if before_ai_call is not None:
+                before_ai_call()
             return await runtime.ainvoke_text(
                 system_prompt=(
                     "You are the knowledge-base answering service for a schedule app. "
@@ -785,6 +826,7 @@ class RagService:
                 ),
                 human_payload=human_payload,
                 temperature=0.2,
+                usage_callback=usage_callback,
             )
         except AiRuntimeError as exc:
             raise RuntimeError(str(exc)) from exc
@@ -795,6 +837,7 @@ class RagService:
         answer_candidates: list[dict[str, object]],
         *,
         recent_turns: list[RagSessionTurn] | None = None,
+        usage_callback: UsageCallback | None = None,
     ) -> AsyncIterator[str]:
         runtime = RagService._get_runtime()
         if runtime is None or not answer_candidates:
@@ -821,6 +864,7 @@ class RagService:
                 ),
                 human_payload=human_payload,
                 temperature=0.2,
+                usage_callback=usage_callback,
             ):
                 if chunk:
                     yield chunk
@@ -834,6 +878,8 @@ class RagService:
         top_k: int,
         *,
         session_id: str | None = None,
+        before_retrieval_call: Callable[[], None] | None = None,
+        retrieval_usage_callback: UsageCallback | None = None,
     ) -> PreparedRagStream:
         normalized_session_id = RagService._normalize_session_id(session_id)
         recent_turns = RagService._recent_session_turns(user_id, normalized_session_id)
@@ -842,6 +888,8 @@ class RagService:
             user_id=user_id,
             query=retrieval_query,
             top_k=max(top_k, top_k * RAG_ANSWER_FETCH_MULTIPLIER),
+            before_ai_call=before_retrieval_call,
+            usage_callback=retrieval_usage_callback,
         )
         answer_candidates = RagService._build_answer_candidates(user_id, retrieved)
         return PreparedRagStream(

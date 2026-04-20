@@ -6,6 +6,7 @@ import AdminView from "@/views/AdminView.vue";
 import HomeView from "@/views/HomeView.vue";
 import ParseView from "@/views/ParseView.vue";
 import PublicShareView from "@/views/PublicShareView.vue";
+import QuotaView from "@/views/QuotaView.vue";
 import RagView from "@/views/RagView.vue";
 import ScheduleView from "@/views/ScheduleView.vue";
 import ShareView from "@/views/ShareView.vue";
@@ -46,6 +47,12 @@ export const router = createRouter({
       name: "share-public",
       component: PublicShareView,
       meta: { hideChrome: true }
+    },
+    {
+      path: "/quota",
+      name: "quota",
+      component: QuotaView,
+      meta: { requiresAuth: true, hideChrome: true }
     },
     {
       path: "/admin",

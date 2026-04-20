@@ -4,8 +4,10 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user_id_ai_safe
+from app.core.database import get_db
 from app.schemas import (
     ParseDraftRequest,
     ParseDraftResponse,
@@ -14,18 +16,40 @@ from app.schemas import (
     ParseSessionMessageRequest,
     ParseSessionResponse,
 )
-from app.services import ParseService
+from app.services import ParseService, QuotaService
+from app.services.quota_service import QuotaExceededError
 
 router = APIRouter(prefix="/parse", tags=["parse"])
+
+
+def _raise_quota_http_error(exc: QuotaExceededError) -> None:
+    raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=exc.to_http_detail()) from exc
 
 
 @router.post("/schedule-draft", response_model=ParseDraftResponse, status_code=status.HTTP_200_OK)
 async def parse_schedule_draft(
     payload: ParseDraftRequest,
+    db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> ParseDraftResponse:
+    def ensure_quota() -> None:
+        QuotaService.ensure_token_quota_available(db, user_id)
+
+    def record_usage(usage) -> None:
+        QuotaService.record_token_usage(db, user_id, operation="parse_llm", usage=usage)
+
     try:
-        return await ParseService.build_schedule_draft(payload, user_id=user_id)
+        response = await ParseService.build_schedule_draft(
+            payload,
+            user_id=user_id,
+            before_ai_call=ensure_quota,
+            usage_callback=record_usage,
+        )
+        return response
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except QuotaExceededError as exc:
+        _raise_quota_http_error(exc)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
@@ -37,10 +61,26 @@ def _sse_event(event: str, data: dict) -> str:
 @router.post("/schedule-draft/stream", status_code=status.HTTP_200_OK)
 async def parse_schedule_draft_stream(
     payload: ParseDraftRequest,
+    db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> StreamingResponse:
+    def ensure_quota() -> None:
+        QuotaService.ensure_token_quota_available(db, user_id)
+
+    def record_usage(usage) -> None:
+        QuotaService.record_token_usage(db, user_id, operation="parse_llm", usage=usage)
+
     try:
-        draft_response = await ParseService.build_schedule_draft(payload, user_id=user_id)
+        draft_response = await ParseService.build_schedule_draft(
+            payload,
+            user_id=user_id,
+            before_ai_call=ensure_quota,
+            usage_callback=record_usage,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except QuotaExceededError as exc:
+        _raise_quota_http_error(exc)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
@@ -67,10 +107,27 @@ async def parse_schedule_draft_stream(
 @router.post("/sessions", response_model=ParseSessionResponse, status_code=status.HTTP_200_OK)
 async def create_parse_session(
     payload: ParseSessionCreateRequest,
+    db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> ParseSessionResponse:
+    def ensure_quota() -> None:
+        QuotaService.ensure_token_quota_available(db, user_id)
+
+    def record_usage(usage) -> None:
+        QuotaService.record_token_usage(db, user_id, operation="parse_llm", usage=usage)
+
     try:
-        return await ParseService.create_session(payload, user_id=user_id)
+        response = await ParseService.create_session(
+            payload,
+            user_id=user_id,
+            before_ai_call=ensure_quota,
+            usage_callback=record_usage,
+        )
+        return response
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except QuotaExceededError as exc:
+        _raise_quota_http_error(exc)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
@@ -79,12 +136,30 @@ async def create_parse_session(
 async def append_parse_session_message(
     session_id: str,
     payload: ParseSessionMessageRequest,
+    db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user_id_ai_safe),
 ) -> ParseSessionResponse:
+    def ensure_quota() -> None:
+        QuotaService.ensure_token_quota_available(db, user_id)
+
+    def record_usage(usage) -> None:
+        QuotaService.record_token_usage(db, user_id, operation="parse_llm", usage=usage)
+
     try:
-        return await ParseService.append_session_message(session_id, payload, user_id=user_id)
+        response = await ParseService.append_session_message(
+            session_id,
+            payload,
+            user_id=user_id,
+            before_ai_call=ensure_quota,
+            usage_callback=record_usage,
+        )
+        return response
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parse session not found.") from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except QuotaExceededError as exc:
+        _raise_quota_http_error(exc)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 

@@ -4,6 +4,7 @@ from app.services.auth_service import AuthService
 from app.services.email_reminder_service import EmailReminderService
 from app.services.mail_service import MailService
 from app.services.parse_service import ParseService
+from app.services.quota_service import QuotaService
 from app.services.rag_service import RagService
 from app.services.schedule_service import ScheduleService
 from app.services.share_service import ShareService
@@ -17,6 +18,7 @@ __all__ = [
     "ScheduleService",
     "SyncService",
     "ParseService",
+    "QuotaService",
     "RagService",
     "ShareService",
 ]

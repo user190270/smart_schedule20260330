@@ -5,6 +5,7 @@ from datetime import date, datetime, time, timedelta
 import json
 import re
 from threading import Lock
+from collections.abc import Callable
 from typing import Literal
 from uuid import uuid4
 
@@ -23,7 +24,7 @@ from app.schemas import (
     ParseSessionResponse,
     ScheduleDraft,
 )
-from app.services.ai_runtime import AiRuntimeError, AiRuntimeUnavailable, LangChainAiRuntime
+from app.services.ai_runtime import AiRuntimeError, AiRuntimeUnavailable, LangChainAiRuntime, UsageCallback
 
 
 KNOWN_TITLE_KEYWORDS: list[tuple[str, str]] = [
@@ -767,6 +768,9 @@ class ParseService:
         reference_time: datetime,
         current_draft: ScheduleDraft | None,
         session_context: dict[str, object] | None = None,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
     ) -> ScheduleDraft:
         runtime = ParseService._get_runtime()
         base_draft = current_draft or ScheduleDraft(source=ScheduleSource.AI_PARSED)
@@ -804,11 +808,14 @@ class ParseService:
             "leave start_time unchanged or missing instead of defaulting to a precise hour."
         )
         try:
+            if before_ai_call is not None:
+                before_ai_call()
             parsed = await runtime.ainvoke_structured_output(
                 system_prompt=system_prompt,
                 human_payload=payload,
                 output_model=ParseLLMOutput,
                 temperature=0,
+                usage_callback=usage_callback,
             )
         except AiRuntimeError:
             return fallback_preview
@@ -843,10 +850,23 @@ class ParseService:
         return _apply_update_plan(base_draft, _build_fallback_update_plan(text, reference_time, current_draft))
 
     @staticmethod
-    async def build_schedule_draft(payload: ParseDraftRequest, user_id: int) -> ParseDraftResponse:
+    async def build_schedule_draft(
+        payload: ParseDraftRequest,
+        user_id: int,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
+    ) -> ParseDraftResponse:
         _ = user_id
         reference_time = _resolve_reference_time(payload.reference_time)
-        draft = await ParseService._build_draft_with_langchain(payload.text.strip(), reference_time, None, None)
+        draft = await ParseService._build_draft_with_langchain(
+            payload.text.strip(),
+            reference_time,
+            None,
+            None,
+            before_ai_call=before_ai_call,
+            usage_callback=usage_callback,
+        )
         missing_fields = _build_missing_fields(draft)
         follow_up_questions = _build_follow_up_questions(missing_fields)
         return ParseDraftResponse(
@@ -992,7 +1012,14 @@ class ParseService:
         session.draft.remark = _compose_session_remark(ParseService._user_messages(session))
 
     @staticmethod
-    async def _apply_message_turn(session: ParseSessionState, latest_message: str, reference_time: datetime) -> None:
+    async def _apply_message_turn(
+        session: ParseSessionState,
+        latest_message: str,
+        reference_time: datetime,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
+    ) -> None:
         current_draft = session.draft.model_copy(deep=True)
         session_context = ParseService._build_session_context(session, reference_time)
         merged = await ParseService._build_draft_with_langchain(
@@ -1000,6 +1027,8 @@ class ParseService:
             reference_time,
             current_draft,
             session_context,
+            before_ai_call=before_ai_call,
+            usage_callback=usage_callback,
         )
         if current_draft.storage_strategy and not merged.storage_strategy:
             merged.storage_strategy = current_draft.storage_strategy
@@ -1018,11 +1047,23 @@ class ParseService:
             ParseService._append_tool_call(session, "ask_follow_up", "当前草稿仍有缺失字段，继续发起澄清。")
 
     @staticmethod
-    async def create_session(payload: ParseSessionCreateRequest, user_id: int) -> ParseSessionResponse:
+    async def create_session(
+        payload: ParseSessionCreateRequest,
+        user_id: int,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
+    ) -> ParseSessionResponse:
         reference_time = _resolve_reference_time(payload.reference_time)
         session = ParseService._new_session(user_id)
         ParseService._append_message(session, "user", payload.message.strip(), reference_time)
-        await ParseService._apply_message_turn(session, payload.message.strip(), reference_time)
+        await ParseService._apply_message_turn(
+            session,
+            payload.message.strip(),
+            reference_time,
+            before_ai_call=before_ai_call,
+            usage_callback=usage_callback,
+        )
         with ParseService._lock:
             ParseService._sessions[session.session_id] = session
         return ParseService._build_session_response(session)
@@ -1040,11 +1081,20 @@ class ParseService:
         session_id: str,
         payload: ParseSessionMessageRequest,
         user_id: int,
+        *,
+        before_ai_call: Callable[[], None] | None = None,
+        usage_callback: UsageCallback | None = None,
     ) -> ParseSessionResponse:
         reference_time = _resolve_reference_time(payload.reference_time)
         session = ParseService._require_session(session_id, user_id)
         ParseService._append_message(session, "user", payload.message.strip(), reference_time)
-        await ParseService._apply_message_turn(session, payload.message.strip(), reference_time)
+        await ParseService._apply_message_turn(
+            session,
+            payload.message.strip(),
+            reference_time,
+            before_ai_call=before_ai_call,
+            usage_callback=usage_callback,
+        )
         return ParseService._build_session_response(session)
 
     @staticmethod
