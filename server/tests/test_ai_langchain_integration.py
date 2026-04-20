@@ -258,7 +258,7 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
         runtime.ainvoke_structured_output.assert_awaited()
 
     def test_rag_paths_use_langchain_runtime_when_available(self) -> None:
-        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+        async def fake_embed_documents(texts: list[str], **kwargs) -> list[list[float]]:
             return [[round(0.01 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
 
         streamed_payloads: list[dict] = []
@@ -327,7 +327,7 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
             self.assertGreater(chunk_count, 0)
 
     def test_rag_follow_up_session_history_reaches_runtime(self) -> None:
-        async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+        async def fake_embed_documents(texts: list[str], **kwargs) -> list[list[float]]:
             return [[round(0.015 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
 
         streamed_payloads: list[dict] = []

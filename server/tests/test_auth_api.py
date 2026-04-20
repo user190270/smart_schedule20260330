@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
+from app.core.database import SessionLocal
 from app.main import app
 from tests.db_helpers import reset_database
 
@@ -47,6 +49,28 @@ class AuthApiTestCase(unittest.TestCase):
             json={"username": "auth_user_2", "password": "wrong_pass_123"},
         )
         self.assertEqual(login.status_code, 401)
+
+    def test_login_accepts_lowercase_subscription_tier_value_from_existing_row(self) -> None:
+        register = self.client.post(
+            "/api/auth/register",
+            json={"username": "auth_user_legacy", "password": "demo_pass_123"},
+        )
+        self.assertEqual(register.status_code, 201)
+        user_id = register.json()["user"]["id"]
+
+        with SessionLocal() as db:
+            db.execute(
+                text("UPDATE users SET subscription_tier = 'free' WHERE id = :user_id"),
+                {"user_id": user_id},
+            )
+            db.commit()
+
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "auth_user_legacy", "password": "demo_pass_123"},
+        )
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["user"]["subscription_tier"], "free")
 
     def test_me_requires_bearer_token(self) -> None:
         response = self.client.get("/api/auth/me")
