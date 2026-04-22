@@ -97,6 +97,8 @@ async def parse_schedule_draft_stream(
             {
                 "missing_fields": draft_response.missing_fields,
                 "follow_up_questions": [item.model_dump(mode="json") for item in draft_response.follow_up_questions],
+                "state": draft_response.state,
+                "trace": [item.model_dump(mode="json") for item in draft_response.trace],
                 "requires_human_review": draft_response.requires_human_review,
             },
         )

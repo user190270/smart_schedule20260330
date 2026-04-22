@@ -39,19 +39,21 @@
 - 页面主体与筛选：`frontend/src/views/ScheduleView.vue:1`。
 - 邮件提醒配置 UI：`frontend/src/views/ScheduleView.vue:31`。
 - 新建/编辑弹层：`frontend/src/views/ScheduleView.vue:130`。
-- 新建入口：`frontend/src/views/ScheduleView.vue:455`。
-- 编辑入口：`frontend/src/views/ScheduleView.vue:470`。
-- 保存：`frontend/src/views/ScheduleView.vue:537`。
-- 删除确认：`frontend/src/views/ScheduleView.vue:589`。
-- 冲突解决：`frontend/src/views/ScheduleView.vue:623`。
+- 重叠提示弹层：`frontend/src/views/ScheduleView.vue:236`、`242`。
+- 新建入口：`frontend/src/views/ScheduleView.vue:510`。
+- 编辑入口：`frontend/src/views/ScheduleView.vue:526`。
+- 保存与继续保存：`frontend/src/views/ScheduleView.vue:594`、`662`。
+- 删除确认：`frontend/src/views/ScheduleView.vue:267`、`686`。
+- 冲突解决：`frontend/src/views/ScheduleView.vue:287`、`691`。
 
 ### 解析页 `ParseView.vue`
 
 - 会话区与草稿确认卡：`frontend/src/views/ParseView.vue:1`。
-- 草稿与会话状态映射：`frontend/src/views/ParseView.vue:349`、`370`。
-- 草稿补丁防抖：`frontend/src/views/ParseView.vue:407`、`426`、`446`。
-- 发起/继续解析：`frontend/src/views/ParseView.vue:504`。
-- 确认保存到本地仓：`frontend/src/views/ParseView.vue:537`。
+- 阶段标签与最近轨迹：`frontend/src/views/ParseView.vue:41`、`65`、`272`、`284`、`350`。
+- 草稿与会话状态映射：`frontend/src/views/ParseView.vue:260`、`396`、`417`。
+- 草稿补丁防抖：`frontend/src/views/ParseView.vue:464`、`493`。
+- 发起/继续解析：`frontend/src/views/ParseView.vue:551`。
+- 确认保存到本地仓：`frontend/src/views/ParseView.vue:584`。
 
 ### 知识库页 `RagView.vue`
 
@@ -85,7 +87,7 @@
 - Auth：`frontend/src/api/auth.ts:32`、`38`、`44`、`49`。
 - Schedules：`frontend/src/api/schedules.ts:47`、`54`、`59`、`64`。
 - Sync：`frontend/src/api/sync.ts:48`、`53`、`58`。
-- Parse：`frontend/src/api/parse.ts:61`、`68`、`78`。
+- Parse：`frontend/src/api/parse.ts:22`、`38`、`48`、`84`、`91`、`101`。
 - RAG：`frontend/src/api/rag.ts:47`、`54`、`61`、`69`。
 - Share：`frontend/src/api/share.ts:20`、`25`。
 - Admin：`frontend/src/api/admin.ts:17`、`22`。
@@ -104,6 +106,6 @@
 - 想改“本地状态怎么演进”：读 `local-schedules` store，再看 `ScheduleView.vue`。
 - 想改“Push/Pull/Rebuild 按钮怎么串起来”：读 `HomeView.vue` 与 `cloud-sync` store。
 - 想改配额页或层级入口：读 `QuotaView.vue`，再看 `auth.ts` / `auth` store，必要时再看后端 `quota_service.py`。
-- 想改 Parse 页面：读 `ParseView.vue`，再看 `parse-session.ts`，最后再看后端 `parse_service.py`。
+- 想改 Parse 页面：先读 `ParseView.vue` 的阶段/轨迹区，再看 `parse-session.ts`，最后再看后端 `parse_service.py`。
 - 想改 RAG 页面：读 `RagView.vue`，再看 `api/rag.ts` 的 SSE 消费。
 - 想改本地存储或移动适配：读 `local-store.ts`、`notification.ts`、`runtime-config.ts`。

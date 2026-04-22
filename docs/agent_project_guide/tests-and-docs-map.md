@@ -12,11 +12,11 @@
 - Admin：`server/tests/test_admin_api.py:35`、`54`、`58`、`66`。
 - 日程 CRUD：`server/tests/test_schedule_crud.py:19`、`61`、`86`、`90`、`101`、`115`。
 - Sync：`server/tests/test_sync_api.py:52`、`107`、`136`、`162`、`187`。
-- Parse 合同：`server/tests/test_parse_contract.py:22`、`39`、`54`、`83`、`119`、`136`、`166`、`202`、`233`、`261`、`290`、`318`。
+- Parse 合同：`server/tests/test_parse_contract.py:35`、`59`、`129`、`142`、`214`、`335`。
 - RAG 工作流：`server/tests/test_rag_workflow.py:79`、`111`、`169`、`185`、`265`、`287`、`333`、`369`、`447`。
 - Share：`server/tests/test_share_api.py:39`、`53`、`57`。
 - Email reminders：`server/tests/test_email_reminders.py:64`、`77`、`89`、`118`、`151`、`161`。
-- LangChain 路径：`server/tests/test_ai_langchain_integration.py:30`、`52`、`97`、`161`、`226`、`260`、`329`。
+- LangChain 路径：`server/tests/test_ai_langchain_integration.py:97`、`149`、`161`、`217`、`226`、`261`、`329`。
 
 ## 2. 测试阅读建议
 
@@ -35,7 +35,7 @@
 - `docs/task_board.md`
   - 任务拆分与步骤状态。
 - `docs/api_contract.md`
-  - 最近一轮接口边界，当前聚焦 optional email reminder 的增量约束。
+  - 接口边界参考，只有在需要确认增量 contract 时再读。
 - `docs/decision_log.md`
   - 历史决策与取舍，只有在需要解释“为什么这样做”时再读。
 
@@ -62,7 +62,7 @@
 - 当前状态文档记录的最近验证：
   - `docker compose exec api pytest /app/tests -q`
   - `docker compose exec frontend npm run build`
-  - `python skills/coding-agent-loop/scripts/docs_consistency_check.py --docs-root docs`
+  - `python skills/coding-agent-loop-en/scripts/docs_consistency_check.py --docs-root docs`
 
 ## 6. 阅读时建议忽略的生成物
 

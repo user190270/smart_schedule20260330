@@ -62,12 +62,13 @@
         </article>
       </div>
 
-      <div v-if="displayedToolCalls.length > 0" class="tool-trace">
-        <div class="tool-trace-title">最近动作</div>
+      <div v-if="displayedTraceEntries.length > 0" class="tool-trace">
+        <div class="tool-trace-title">最近轨迹</div>
         <div class="tool-trace-list">
-          <div v-for="(tool, index) in displayedToolCalls" :key="`${tool.name}-${index}`" class="tool-pill">
-            <strong>{{ tool.name }}</strong>
-            <span>{{ tool.summary }}</span>
+          <div v-for="(entry, index) in displayedTraceEntries" :key="`${entry.action}-${index}`" class="tool-pill">
+            <strong>{{ traceActionLabel(entry.action) }}</strong>
+            <span>{{ entry.summary }}</span>
+            <small v-if="entry.source" class="tool-source">{{ traceSourceLabel(entry.source) }}</small>
           </div>
         </div>
       </div>
@@ -215,6 +216,7 @@ import {
   patchParseSessionDraft,
   type ParseAgentMessage,
   type ParseAgentToolCall,
+  type ParseAgentTraceEntry,
   type ParseScheduleDraft,
   type ParseSessionResponse
 } from "@/api/parse";
@@ -255,7 +257,7 @@ const quickSamples = [
 ];
 
 const strategyOptions = computed(() => localScheduleStore.storageStrategyOptions());
-const readyForConfirm = computed(() => sessionState.value?.ready_for_confirm ?? false);
+const readyForConfirm = computed(() => sessionState.value?.state === "ready_for_confirm");
 const nextActionLabel = computed(() =>
   sessionState.value?.next_action === "finalize_draft" ? "下一步：确认草稿" : "下一步：继续澄清"
 );
@@ -271,11 +273,26 @@ const sessionStageLabel = computed(() => {
   if (!sessionState.value) {
     return "等待开始";
   }
-  return sessionState.value.ready_for_confirm ? "草稿已成形" : "澄清中";
+  return sessionState.value.state === "ready_for_confirm" ? "待确认" : "澄清中";
 });
-const displayedToolCalls = computed(() => {
-  const combined = [...(sessionState.value?.tool_calls ?? []), ...localToolCalls.value];
-  return combined.slice(-4);
+type DisplayedTraceEntry = {
+  action: string;
+  summary: string;
+  source?: ParseAgentTraceEntry["source"];
+};
+
+const displayedTraceEntries = computed<DisplayedTraceEntry[]>(() => {
+  const responseTrace = sessionState.value?.trace ?? [];
+  const legacyTrace =
+    responseTrace.length > 0
+      ? responseTrace
+      : (sessionState.value?.tool_calls ?? []).map((tool) => ({
+          action: tool.name,
+          summary: tool.summary,
+          source: null
+        }));
+
+  return [...legacyTrace, ...localToolCalls.value.map((tool) => ({ action: tool.name, summary: tool.summary, source: null }))].slice(-4);
 });
 const referenceTimeLabel = computed(() => formatScheduleDateTime(buildReferenceTime()));
 const canPersistDraft = computed(() => {
@@ -327,6 +344,44 @@ function mapMissingFieldLabel(field: string): string {
       return "开始时间";
     default:
       return field;
+  }
+}
+
+function traceActionLabel(action: string): string {
+  switch (action) {
+    case "build_context":
+      return "构建上下文";
+    case "plan_update":
+      return "生成计划";
+    case "apply_draft_update":
+      return "应用草稿更新";
+    case "request_clarification":
+      return "请求澄清";
+    case "prepare_confirmation":
+      return "准备确认";
+    case "update_draft":
+      return "更新草稿";
+    case "ask_follow_up":
+      return "继续澄清";
+    case "finalize_draft":
+      return "确认草稿";
+    case "save_schedule_to_local":
+      return "保存到本地仓";
+    default:
+      return action;
+  }
+}
+
+function traceSourceLabel(source: ParseAgentTraceEntry["source"]): string {
+  switch (source) {
+    case "runtime":
+      return "runtime";
+    case "heuristic":
+      return "heuristic";
+    case "manual_patch":
+      return "manual_patch";
+    default:
+      return "";
   }
 }
 
@@ -731,6 +786,11 @@ async function persistDraft() {
 .tool-pill span {
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
+}
+
+.tool-source {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .composer-panel {

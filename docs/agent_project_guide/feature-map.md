@@ -17,12 +17,13 @@
 ## 2. 本地日程仓与本地提醒
 
 - 本地记录结构：`frontend/src/repositories/local-schedules.ts:30`。
-- 新建本地记录：`frontend/src/repositories/local-schedules.ts:251`。
+- 新建本地记录：`frontend/src/repositories/local-schedules.ts:347`。
 - 本地仓 store：`frontend/src/stores/local-schedules.ts:300`。
-- 创建/更新：`frontend/src/stores/local-schedules.ts:393`、`421`。
-- 删除菜单与冲突解法：`frontend/src/stores/local-schedules.ts:713`、`780`。
+- 创建/更新：`frontend/src/stores/local-schedules.ts:395`、`423`。
+- 时间重叠判断/查询：`frontend/src/repositories/local-schedules.ts:215`、`232`，`frontend/src/stores/local-schedules.ts:715`。
+- 删除菜单与冲突解法：`frontend/src/stores/local-schedules.ts:719`、`769`。
 - 本地提醒同步：`frontend/src/services/notification.ts:138`，取消 `:187`。
-- 日程页面 UI：创建 `frontend/src/views/ScheduleView.vue:455`，编辑 `:470`，保存 `:537`，删除 `:589`，冲突解决 `:623`。
+- 日程页面 UI：创建 `frontend/src/views/ScheduleView.vue:510`，编辑 `:526`，保存 `:594`，重叠提示 `:237`、`662`，删除 `:686`，冲突解决 `:691`。
 - 后端云端 CRUD：路由 `server/app/routers/schedules.py:14`、`27`、`37`、`59`，服务 `server/app/services/schedule_service.py:16`、`56`、`81`。
 - 测试：`server/tests/test_schedule_crud.py:19`、`61`、`90`、`101`、`115`。
 
@@ -39,18 +40,18 @@
 
 ## 4. AI 解析与草稿确认
 
-- 前端 API：`frontend/src/api/parse.ts:61`、`68`、`78`。
+- 前端 API：parse draft / session / patch 在 `frontend/src/api/parse.ts:38`、`48`、`84`、`91`、`101`。
 - 前端会话 store：`frontend/src/stores/parse-session.ts:49`。
-- 前端页面入口：发消息 `frontend/src/views/ParseView.vue:504`，确认保存 `:537`。
-- 草稿回写与补丁同步：`frontend/src/views/ParseView.vue:349`、`370`、`407`、`426`。
-- 后端路由：普通解析 `server/app/routers/parse.py:22`，SSE `:37`，会话创建 `:67`，继续对话 `:78`，草稿补丁 `:92`。
-- Fallback 解析计划：`server/app/services/parse_service.py:569`。
-- LangChain 合并逻辑：`server/app/services/parse_service.py:651`、`681`、`765`。
-- 会话上下文打包：`server/app/services/parse_service.py:912`。
-- 单轮消息处理：`server/app/services/parse_service.py:995`。
-- 会话入口：创建 `server/app/services/parse_service.py:1021`，继续 `:1039`，补丁 `:1051`。
-- 合同测试：`server/tests/test_parse_contract.py:22`、`83`、`119`、`136`、`166`、`202`、`233`、`261`、`290`、`318`。
-- LangChain 路径测试：`server/tests/test_ai_langchain_integration.py:97`、`161`、`226`。
+- 前端页面入口：阶段与轨迹 `frontend/src/views/ParseView.vue:41`、`65`、`272`、`284`，发消息 `:551`，确认保存 `:584`。
+- 草稿回写与补丁同步：`frontend/src/views/ParseView.vue:396`、`417`、`493`。
+- 后端路由：普通解析 `server/app/routers/parse.py:29`，SSE `:61`，会话创建 `:109`，继续对话 `:137`，草稿补丁 `:169`。
+- 会话状态与 trace 合同：`server/app/schemas/parse.py:17`、`25`、`84`、`90`、`105`。
+- Fallback 解析计划：`server/app/services/parse_service.py:643`。
+- LangChain 合并逻辑与时间保护：`server/app/services/parse_service.py:722`、`753`、`843`。
+- 会话上下文与响应组装：`server/app/services/parse_service.py:976`、`1020`。
+- 会话入口：单轮 `server/app/services/parse_service.py:922`，创建 `:1148`，继续 `:1178`，补丁 `:1199`。
+- 合同测试：`server/tests/test_parse_contract.py:35`、`59`、`129`、`142`、`214`、`335`。
+- LangChain 路径测试：`server/tests/test_ai_langchain_integration.py:149`、`217`、`261`。
 
 ## 5. RAG 知识库重建、检索、流式问答
 

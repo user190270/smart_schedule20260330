@@ -19,9 +19,30 @@ export type ParseAgentMessage = {
   content: string;
 };
 
+export type ParseAgentTraceEntry = {
+  action:
+    | "build_context"
+    | "plan_update"
+    | "apply_draft_update"
+    | "request_clarification"
+    | "prepare_confirmation";
+  summary: string;
+  source?: "runtime" | "heuristic" | "manual_patch" | null;
+};
+
 export type ParseAgentToolCall = {
   name: "update_draft" | "ask_follow_up" | "finalize_draft" | "save_schedule_to_local";
   summary: string;
+};
+
+export type ParseDraftResponse = {
+  draft: ParseScheduleDraft;
+  missing_fields: string[];
+  follow_up_questions: Array<{ field: string; question: string }>;
+  state: "clarifying" | "ready_for_confirm";
+  trace: ParseAgentTraceEntry[];
+  requires_human_review: boolean;
+  can_persist_directly: boolean;
 };
 
 export type ParseSessionResponse = {
@@ -30,9 +51,11 @@ export type ParseSessionResponse = {
   draft: ParseScheduleDraft;
   missing_fields: string[];
   follow_up_questions: Array<{ field: string; question: string }>;
+  state: "clarifying" | "ready_for_confirm";
   ready_for_confirm: boolean;
   next_action: "ask_follow_up" | "finalize_draft";
   tool_calls: ParseAgentToolCall[];
+  trace: ParseAgentTraceEntry[];
   latest_assistant_message: string | null;
   draft_visible: boolean;
 };

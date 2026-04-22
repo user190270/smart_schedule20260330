@@ -26,7 +26,7 @@
 
 - 本地仓是主工作面：创建、编辑、删除都先作用于 `frontend/src/stores/local-schedules.ts:393`。
 - 云端同步是显式动作：Push/Pull 状态和知识库重建统一由 `frontend/src/stores/cloud-sync.ts:157`、`202`、`232` 调度。
-- AI 解析不是直接写库：解析会话维护草稿，确认后才调用本地仓保存，前端在 `frontend/src/views/ParseView.vue:504`、`537`，后端在 `server/app/services/parse_service.py:995`、`1021`。
+- AI 解析不是直接写库：解析会话维护草稿，并显式返回 `state / trace`；确认后才调用本地仓保存，前端在 `frontend/src/views/ParseView.vue:260`、`284`、`551`、`584`，后端在 `server/app/services/parse_service.py:922`、`976`、`1020`、`1148`、`1199`。
 - 云端 AI 配额按 `user_id` 做每日 token 软上限：重置窗口与记账在 `server/app/services/quota_service.py:38`、`103`、`119`、`129`，Parse / RAG 接入点在 `server/app/routers/parse.py:35`、`67`、`113`、`142` 与 `server/app/routers/rag.py:32`、`59`、`82`、`114`。
 - 知识库只看云端允许索引的日程：重建逻辑在 `server/app/services/rag_service.py:580`、`666`，检索严格带 `user_id` 过滤，见 `server/app/services/rag_service.py:377`。
 - 分享走公共只读 DTO：创建与读取在 `server/app/services/share_service.py:28`、`61`。
@@ -35,7 +35,7 @@
 ## 功能枚举
 
 - 账号注册、登录、个人资料读取与通知邮箱保存。
-- 本地日程 CRUD、存储策略选择、本地提醒调度。
+- 本地日程 CRUD、时间重叠提醒、存储策略选择、本地提醒调度。
 - 显式 Push / Pull，同步冲突标记与解决。
 - AI 日程解析、多轮澄清、草稿补丁与确认保存。
 - RAG 知识库重建、检索、流式问答、多轮追问。
@@ -99,7 +99,7 @@ frontend/
 - 应用装配：`server/app/main.py:25`，`frontend/src/App.vue:1`，`frontend/src/router/index.ts:14`。
 - 本地主状态：`frontend/src/stores/local-schedules.ts:300`。
 - 云端状态：`frontend/src/stores/cloud-sync.ts:69`。
-- Parse 核心：`server/app/services/parse_service.py:753`。
+- Parse 核心：`server/app/services/parse_service.py:823`。
 - RAG 核心：`server/app/services/rag_service.py:132`。
 
 ## 非核心目录
@@ -112,6 +112,6 @@ frontend/
 - `frontend/android/build/`
 - `tmp/`
 - `.git-upload-*`
-- `.worktree-clean-upload/`
+- `.worktree-*/`
 - `media/`
 - `prompts/`

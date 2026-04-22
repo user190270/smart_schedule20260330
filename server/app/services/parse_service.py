@@ -13,11 +13,15 @@ from pydantic import BaseModel, Field
 
 from app.models.enums import ScheduleSource
 from app.schemas import (
+    ParseAgentAction,
     ParseAgentMessage,
     ParseAgentToolCall,
+    ParseAgentTraceEntry,
     ParseDraftRequest,
     ParseDraftResponse,
     ParseFollowUpQuestion,
+    ParsePlanSource,
+    ParseAgentState,
     ParseSessionCreateRequest,
     ParseSessionDraftPatchRequest,
     ParseSessionMessageRequest,
@@ -108,9 +112,10 @@ class SessionMessage:
 
 
 @dataclass
-class SessionToolCall:
-    name: str
+class SessionTraceEntry:
+    action: str
     summary: str
+    source: str | None = None
 
 
 @dataclass
@@ -119,11 +124,10 @@ class ParseSessionState:
     user_id: int
     draft: ScheduleDraft
     messages: list[SessionMessage] = field(default_factory=list)
-    tool_calls: list[SessionToolCall] = field(default_factory=list)
+    trace: list[SessionTraceEntry] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)
     follow_up_questions: list[ParseFollowUpQuestion] = field(default_factory=list)
-    ready_for_confirm: bool = False
-    next_action: str = "ask_follow_up"
+    state: ParseAgentState = "clarifying"
     latest_assistant_message: str | None = None
     updated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
 
@@ -518,6 +522,71 @@ def _build_assistant_message(draft: ScheduleDraft, missing_fields: list[str], fo
     return "\n".join(fragments)
 
 
+TRACE_TOOL_CALL_NAMES: dict[str, str] = {
+    "apply_draft_update": "update_draft",
+    "request_clarification": "ask_follow_up",
+    "prepare_confirmation": "finalize_draft",
+}
+
+
+def _derive_session_state(missing_fields: list[str]) -> ParseAgentState:
+    return "ready_for_confirm" if not missing_fields else "clarifying"
+
+
+def _derive_next_action(state: ParseAgentState) -> ParseAgentAction:
+    return "finalize_draft" if state == "ready_for_confirm" else "ask_follow_up"
+
+
+def _trace_tool_call_name(action: str) -> str | None:
+    return TRACE_TOOL_CALL_NAMES.get(action)
+
+
+def _trace_summary_from_draft_change(before: ScheduleDraft, after: ScheduleDraft) -> str:
+    before_dump = before.model_dump(mode="json")
+    after_dump = after.model_dump(mode="json")
+    changed_fields = [
+        field_name
+        for field_name in ("title", "start_time", "end_time", "location", "remark", "storage_strategy")
+        if before_dump.get(field_name) != after_dump.get(field_name)
+    ]
+    if not changed_fields:
+        return "草稿内容未发生变化。"
+    return "更新字段：" + "、".join(changed_fields) + "。"
+
+
+def _trace_summary_for_state(state: ParseAgentState, missing_fields: list[str], follow_up_questions: list[ParseFollowUpQuestion]) -> str:
+    if state == "ready_for_confirm":
+        return "草稿已完整，可进入确认保存。"
+    if follow_up_questions:
+        return "仍需补充：" + "、".join(missing_fields) + "。"
+    return "仍需补充草稿关键信息。"
+
+
+def _append_trace_entry(
+    session: ParseSessionState,
+    action: str,
+    summary: str,
+    *,
+    source: ParsePlanSource | None = None,
+) -> None:
+    session.trace.append(SessionTraceEntry(action=action, summary=summary, source=source))
+    session.trace = session.trace[-12:]
+
+
+def _session_trace_entries(trace: list[SessionTraceEntry]) -> list[ParseAgentTraceEntry]:
+    return [ParseAgentTraceEntry(action=entry.action, summary=entry.summary, source=entry.source) for entry in trace]
+
+
+def _session_tool_calls(trace: list[SessionTraceEntry]) -> list[ParseAgentToolCall]:
+    tool_calls: list[ParseAgentToolCall] = []
+    for entry in trace:
+        tool_name = _trace_tool_call_name(entry.action)
+        if tool_name is None:
+            continue
+        tool_calls.append(ParseAgentToolCall(name=tool_name, summary=entry.summary))
+    return tool_calls
+
+
 def _extract_json_object(raw_text: str) -> dict | None:
     text = raw_text.strip()
     if text.startswith("```"):
@@ -771,13 +840,13 @@ class ParseService:
         *,
         before_ai_call: Callable[[], None] | None = None,
         usage_callback: UsageCallback | None = None,
-    ) -> ScheduleDraft:
+    ) -> tuple[ScheduleDraft, ParsePlanSource]:
         runtime = ParseService._get_runtime()
         base_draft = current_draft or ScheduleDraft(source=ScheduleSource.AI_PARSED)
         fallback_plan = _build_fallback_update_plan(text, reference_time, current_draft)
         fallback_preview = _apply_update_plan(base_draft, fallback_plan)
         if runtime is None:
-            return fallback_preview
+            return fallback_preview, "heuristic"
 
         payload = {
             "reference_time": reference_time.isoformat(),
@@ -818,7 +887,7 @@ class ParseService:
                 usage_callback=usage_callback,
             )
         except AiRuntimeError:
-            return fallback_preview
+            return fallback_preview, "heuristic"
 
         preferred_fallback_fields = set()
         if session_context:
@@ -838,7 +907,7 @@ class ParseService:
             combined_plan,
             fallback_plan,
         )
-        return _apply_update_plan(base_draft, combined_plan)
+        return _apply_update_plan(base_draft, combined_plan), "runtime"
 
     @staticmethod
     def _build_draft_with_fallback(
@@ -859,7 +928,7 @@ class ParseService:
     ) -> ParseDraftResponse:
         _ = user_id
         reference_time = _resolve_reference_time(payload.reference_time)
-        draft = await ParseService._build_draft_with_langchain(
+        draft, source = await ParseService._build_draft_with_langchain(
             payload.text.strip(),
             reference_time,
             None,
@@ -869,10 +938,32 @@ class ParseService:
         )
         missing_fields = _build_missing_fields(draft)
         follow_up_questions = _build_follow_up_questions(missing_fields)
+        state = _derive_session_state(missing_fields)
+        trace = [
+            ParseAgentTraceEntry(
+                action="build_context",
+                summary="已为单轮解析构建上下文。",
+            ),
+            ParseAgentTraceEntry(
+                action="plan_update",
+                summary="已生成单轮草稿更新计划。",
+                source=source,
+            ),
+            ParseAgentTraceEntry(
+                action="apply_draft_update",
+                summary=_trace_summary_from_draft_change(ScheduleDraft(source=ScheduleSource.AI_PARSED), draft),
+            ),
+            ParseAgentTraceEntry(
+                action="prepare_confirmation" if state == "ready_for_confirm" else "request_clarification",
+                summary=_trace_summary_for_state(state, missing_fields, follow_up_questions),
+            ),
+        ]
         return ParseDraftResponse(
             draft=draft,
             missing_fields=missing_fields,
             follow_up_questions=follow_up_questions,
+            state=state,
+            trace=trace,
             requires_human_review=True,
             can_persist_directly=False,
         )
@@ -892,9 +983,11 @@ class ParseService:
             draft=session.draft,
             missing_fields=session.missing_fields,
             follow_up_questions=session.follow_up_questions,
-            ready_for_confirm=session.ready_for_confirm,
-            next_action=session.next_action,  # type: ignore[arg-type]
-            tool_calls=[ParseAgentToolCall(**call.__dict__) for call in session.tool_calls],
+            state=session.state,
+            ready_for_confirm=session.state == "ready_for_confirm",
+            next_action=_derive_next_action(session.state),
+            tool_calls=_session_tool_calls(session.trace),
+            trace=_session_trace_entries(session.trace),
             latest_assistant_message=session.latest_assistant_message,
             draft_visible=_draft_visible(session.draft),
         )
@@ -918,11 +1011,6 @@ class ParseService:
             SessionMessage(id=str(uuid4()), role=role, content=content, reference_time=reference_time)
         )
         session.updated_at = _aware_now()
-
-    @staticmethod
-    def _append_tool_call(session: ParseSessionState, name: str, summary: str) -> None:
-        session.tool_calls.append(SessionToolCall(name=name, summary=summary))
-        session.tool_calls = session.tool_calls[-12:]
 
     @staticmethod
     def _user_messages(session: ParseSessionState) -> list[str]:
@@ -1006,8 +1094,7 @@ class ParseService:
     def _recompute_session_status(session: ParseSessionState) -> None:
         session.missing_fields = _build_missing_fields(session.draft)
         session.follow_up_questions = _build_follow_up_questions(session.missing_fields)
-        session.ready_for_confirm = len(session.missing_fields) == 0
-        session.next_action = "finalize_draft" if session.ready_for_confirm else "ask_follow_up"
+        session.state = _derive_session_state(session.missing_fields)
         session.draft.source = ScheduleSource.AI_PARSED
         session.draft.remark = _compose_session_remark(ParseService._user_messages(session))
 
@@ -1022,7 +1109,7 @@ class ParseService:
     ) -> None:
         current_draft = session.draft.model_copy(deep=True)
         session_context = ParseService._build_session_context(session, reference_time)
-        merged = await ParseService._build_draft_with_langchain(
+        merged, source = await ParseService._build_draft_with_langchain(
             latest_message,
             reference_time,
             current_draft,
@@ -1033,18 +1120,29 @@ class ParseService:
         if current_draft.storage_strategy and not merged.storage_strategy:
             merged.storage_strategy = current_draft.storage_strategy
 
+        context_summary = "已整理会话上下文，准备合并最新消息。"
+        if session_context is None:
+            context_summary = "会话中尚未形成上下文，直接整理最新消息。"
+        _append_trace_entry(session, "build_context", context_summary)
+        _append_trace_entry(session, "plan_update", "已生成最新消息的草稿更新计划。", source=source)
         session.draft = merged
         ParseService._recompute_session_status(session)
-        ParseService._append_tool_call(session, "update_draft", "根据最新回复更新了当前日程草稿。")
+        _append_trace_entry(
+            session,
+            "apply_draft_update",
+            _trace_summary_from_draft_change(current_draft, session.draft),
+        )
 
         assistant_message = _build_assistant_message(session.draft, session.missing_fields, session.follow_up_questions)
         session.latest_assistant_message = assistant_message
         ParseService._append_message(session, "assistant", assistant_message)
 
-        if session.ready_for_confirm:
-            ParseService._append_tool_call(session, "finalize_draft", "当前草稿已经具备确认保存条件。")
-        else:
-            ParseService._append_tool_call(session, "ask_follow_up", "当前草稿仍有缺失字段，继续发起澄清。")
+        state_action = "prepare_confirmation" if session.state == "ready_for_confirm" else "request_clarification"
+        _append_trace_entry(
+            session,
+            state_action,
+            _trace_summary_for_state(session.state, session.missing_fields, session.follow_up_questions),
+        )
 
     @staticmethod
     async def create_session(
@@ -1104,12 +1202,20 @@ class ParseService:
         user_id: int,
     ) -> ParseSessionResponse:
         session = ParseService._require_session(session_id, user_id)
+        before_patch = session.draft.model_copy(deep=True)
         patch = payload.draft.model_dump(exclude_unset=True)
 
         for field_name, value in patch.items():
             setattr(session.draft, field_name, value)
 
+        _append_trace_entry(session, "build_context", "已整理手动补丁上下文，准备同步草稿。")
+        _append_trace_entry(session, "plan_update", "已根据手动编辑生成草稿更新计划。", source="manual_patch")
         ParseService._recompute_session_status(session)
         session.latest_assistant_message = None
-        ParseService._append_tool_call(session, "update_draft", "已按用户手动编辑同步当前草稿。")
+        _append_trace_entry(session, "apply_draft_update", _trace_summary_from_draft_change(before_patch, session.draft))
+        _append_trace_entry(
+            session,
+            "prepare_confirmation" if session.state == "ready_for_confirm" else "request_clarification",
+            _trace_summary_for_state(session.state, session.missing_fields, session.follow_up_questions),
+        )
         return ParseService._build_session_response(session)

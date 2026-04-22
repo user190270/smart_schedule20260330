@@ -233,6 +233,37 @@
       </div>
     </van-popup>
 
+    <van-popup
+      v-model:show="showOverlapSheet"
+      position="bottom"
+      round
+      class="overlap-popup"
+      closeable
+      @closed="clearOverlapWarning"
+    >
+      <div v-if="overlapWarning" class="overlap-sheet">
+        <div class="panel-header">
+          <van-icon name="warning-o" color="#f59e0b" />
+          <h3 class="panel-title">发现时间重叠</h3>
+        </div>
+        <p class="delete-subtitle">保存前发现以下日程与当前编辑内容重叠。</p>
+        <div class="overlap-target">
+          <strong>{{ overlapWarning.candidateTitle }}</strong>
+          <span>{{ formatScheduleRange(overlapWarning.candidateStartTime, overlapWarning.candidateEndTime) }}</span>
+        </div>
+        <div class="overlap-list">
+          <section v-for="item in overlapWarning.overlaps" :key="item.local_id" class="overlap-card">
+            <strong>{{ item.title }}</strong>
+            <span>{{ formatScheduleRange(item.start_time, item.end_time) }}</span>
+          </section>
+        </div>
+        <div class="overlap-actions">
+          <van-button round block type="primary" :loading="saving" @click="continueSave">继续保存</van-button>
+          <van-button round block plain @click="returnToEdit">返回修改</van-button>
+        </div>
+      </div>
+    </van-popup>
+
     <van-popup v-model:show="showDeleteSheet" position="bottom" round class="delete-popup" closeable>
       <div class="delete-sheet">
         <div class="panel-header">
@@ -344,12 +375,15 @@ const localScheduleStore = useLocalScheduleStore();
 
 const saving = ref(false);
 const showEditor = ref(false);
+const showOverlapSheet = ref(false);
 const showDeleteSheet = ref(false);
 const showConflictSheet = ref(false);
 const activeFilter = ref<FilterMode>("all");
 const editingLocalId = ref<string | null>(null);
 const deleteTarget = ref<LocalScheduleRecord | null>(null);
 const conflictLocalId = ref<string | null>(null);
+const pendingSubmission = ref<ScheduleSubmission | null>(null);
+const overlapWarning = ref<OverlapWarning | null>(null);
 const notificationEmail = ref("");
 const savingProfile = ref(false);
 
@@ -424,6 +458,27 @@ const conflictDetails = computed<ConflictDetails | null>(() => {
   return localScheduleStore.getConflictDetails(conflictLocalId.value);
 });
 
+type ScheduleSubmission = {
+  localId: string | null;
+  payload: {
+    title: string;
+    start_time: string;
+    end_time: string | null;
+    location: string | null;
+    remark: string | null;
+    storage_strategy: LocalScheduleRecord["storage_strategy"];
+    email_reminder_enabled: boolean;
+    email_remind_before_minutes: number | null;
+  };
+};
+
+type OverlapWarning = {
+  candidateTitle: string;
+  candidateStartTime: string;
+  candidateEndTime: string | null;
+  overlaps: LocalScheduleRecord[];
+};
+
 onMounted(async () => {
   await authStore.hydrate();
   await localScheduleStore.initialize();
@@ -454,6 +509,7 @@ watch(
 
 function openCreate() {
   editingLocalId.value = null;
+  clearOverlapWarning();
   form.value = {
     title: "",
     start_time: new Date().toISOString(),
@@ -469,6 +525,7 @@ function openCreate() {
 
 function openEdit(item: LocalScheduleRecord) {
   editingLocalId.value = item.local_id;
+  clearOverlapWarning();
   form.value = {
     title: item.title,
     start_time: item.start_time,
@@ -540,40 +597,90 @@ async function submitForm() {
     return;
   }
 
+  try {
+    const submission = buildSubmission();
+    const overlaps = localScheduleStore.findOverlappingSchedules({
+      start_time: submission.payload.start_time,
+      end_time: submission.payload.end_time,
+      exclude_local_id: submission.localId
+    });
+
+    if (overlaps.length > 0) {
+      pendingSubmission.value = submission;
+      overlapWarning.value = {
+        candidateTitle: submission.payload.title,
+        candidateStartTime: submission.payload.start_time,
+        candidateEndTime: submission.payload.end_time,
+        overlaps
+      };
+      showOverlapSheet.value = true;
+      return;
+    }
+
+    await saveSubmission(submission);
+  } catch (error) {
+    showNotify({ type: "danger", message: formatError(error, "保存日程失败。") });
+  }
+}
+
+function buildSubmission(): ScheduleSubmission {
+  return {
+    localId: editingLocalId.value,
+    payload: {
+      title: form.value.title.trim(),
+      start_time: form.value.start_time,
+      end_time: form.value.end_time || null,
+      location: form.value.location || null,
+      remark: form.value.remark || null,
+      storage_strategy: form.value.storage_strategy,
+      email_reminder_enabled: form.value.email_reminder_enabled,
+      email_remind_before_minutes: form.value.email_remind_before_minutes
+    }
+  };
+}
+
+async function saveSubmission(submission: ScheduleSubmission) {
   saving.value = true;
   try {
-    if (editingLocalId.value) {
-      await localScheduleStore.updateSchedule(editingLocalId.value, {
-        title: form.value.title.trim(),
-        start_time: form.value.start_time,
-        end_time: form.value.end_time || null,
-        location: form.value.location || null,
-        remark: form.value.remark || null,
-        storage_strategy: form.value.storage_strategy,
-        email_reminder_enabled: form.value.email_reminder_enabled,
-        email_remind_before_minutes: form.value.email_remind_before_minutes
-      });
+    if (submission.localId) {
+      await localScheduleStore.updateSchedule(submission.localId, submission.payload);
       showNotify({ type: "success", message: "日程已更新。" });
     } else {
-      await localScheduleStore.createSchedule({
-        title: form.value.title.trim(),
-        start_time: form.value.start_time,
-        end_time: form.value.end_time || null,
-        location: form.value.location || null,
-        remark: form.value.remark || null,
-        storage_strategy: form.value.storage_strategy,
-        email_reminder_enabled: form.value.email_reminder_enabled,
-        email_remind_before_minutes: form.value.email_remind_before_minutes
-      });
+      await localScheduleStore.createSchedule(submission.payload);
       showNotify({ type: "success", message: "日程已保存到本地仓。" });
     }
 
+    pendingSubmission.value = null;
+    overlapWarning.value = null;
+    showOverlapSheet.value = false;
     showEditor.value = false;
-  } catch (error) {
-    showNotify({ type: "danger", message: formatError(error, "保存日程失败。") });
   } finally {
     saving.value = false;
   }
+}
+
+async function continueSave() {
+  if (!pendingSubmission.value) {
+    return;
+  }
+
+  try {
+    await saveSubmission(pendingSubmission.value);
+  } catch (error) {
+    showNotify({ type: "danger", message: formatError(error, "保存日程失败。") });
+  }
+}
+
+function returnToEdit() {
+  showOverlapSheet.value = false;
+  pendingSubmission.value = null;
+  overlapWarning.value = null;
+}
+
+function clearOverlapWarning() {
+  showOverlapSheet.value = false;
+  pendingSubmission.value = null;
+  overlapWarning.value = null;
 }
 
 function openDeleteMenu(item: LocalScheduleRecord) {
@@ -884,6 +991,7 @@ function formatError(error: unknown, fallback: string): string {
 
 .editor-popup,
 .delete-popup,
+.overlap-popup,
 .conflict-popup {
   max-height: 90vh;
   display: flex;
@@ -892,6 +1000,7 @@ function formatError(error: unknown, fallback: string): string {
 
 .editor-content,
 .delete-sheet,
+.overlap-sheet,
 .conflict-sheet {
   padding: var(--spacing-xl) var(--spacing-md) var(--spacing-lg);
   flex: 1;
@@ -992,6 +1101,55 @@ function formatError(error: unknown, fallback: string): string {
 
 .delete-option + .delete-option {
   margin-top: var(--spacing-sm);
+}
+
+.overlap-target {
+  margin-top: var(--spacing-md);
+  border: 1px solid var(--bg-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.08);
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.overlap-target strong,
+.overlap-card strong {
+  color: var(--text-main);
+  font-size: var(--font-size-sm);
+}
+
+.overlap-target span,
+.overlap-card span {
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.overlap-list {
+  margin-top: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.overlap-card {
+  border: 1px solid var(--bg-subtle);
+  border-left: 3px solid #f59e0b;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.overlap-actions {
+  margin-top: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
 }
 
 .conflict-reason {

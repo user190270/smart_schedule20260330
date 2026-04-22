@@ -6,12 +6,14 @@ import {
   buildNewLocalScheduleRecord,
   buildPulledCloudRecord,
   createConflictSnapshotFromCloud,
+  findOverlappingLocalScheduleRecords,
   detectLocalScheduleStorageKind,
   readLocalScheduleRecords,
   sortLocalScheduleRecords,
   writeLocalScheduleRecords,
   type ConflictSnapshot,
   type LocalScheduleRecord,
+  type LocalScheduleOverlapQuery,
   type LocalScheduleScope,
   type ScheduleStorageStrategy,
   type ScheduleSyncIntent
@@ -708,6 +710,10 @@ export const useLocalScheduleStore = defineStore("local-schedules", {
 
     getRecordByLocalId(localId: string): LocalScheduleRecord | null {
       return this.records.find((record) => record.local_id === localId) ?? null;
+    },
+
+    findOverlappingSchedules(query: LocalScheduleOverlapQuery): LocalScheduleRecord[] {
+      return findOverlappingLocalScheduleRecords(this.visibleRecords, query);
     },
 
     getDeleteOptions(record: LocalScheduleRecord): DeleteActionOption[] {

@@ -39,3 +39,10 @@ frontend/android/.cxx/
 frontend/android/local.properties
 
 .git-upload-*/
+.worktree-*/
+
+# Root-level generated ER diagram exports; tracked sources live under er_draw/
+/er_diagram.pdf
+/er_diagram.png
+/er_aux_diagram.pdf
+/er_aux_diagram.png

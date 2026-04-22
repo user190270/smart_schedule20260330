@@ -32,6 +32,14 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertFalse(body["can_persist_directly"])
         self.assertEqual(body["missing_fields"], [])
         self.assertEqual(body["follow_up_questions"], [])
+        self.assertEqual(body["state"], "ready_for_confirm")
+        self.assertEqual([entry["action"] for entry in body["trace"]], [
+            "build_context",
+            "plan_update",
+            "apply_draft_update",
+            "prepare_confirmation",
+        ])
+        self.assertEqual(body["trace"][1]["source"], "heuristic")
         self.assertEqual(body["draft"]["source"], "ai_parsed")
         self.assertIsNotNone(body["draft"]["start_time"])
         self.assertIsNotNone(body["draft"]["end_time"])
@@ -48,6 +56,8 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertIn("start_time", body["missing_fields"])
         self.assertNotIn("end_time", body["missing_fields"])
         self.assertGreaterEqual(len(body["follow_up_questions"]), 1)
+        self.assertEqual(body["state"], "clarifying")
+        self.assertEqual(body["trace"][-1]["action"], "request_clarification")
         self.assertTrue(body["requires_human_review"])
         self.assertFalse(body["can_persist_directly"])
 
@@ -129,9 +139,12 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertTrue(body["draft_visible"])
         self.assertEqual(body["draft"]["title"], "吃饭")
         self.assertEqual(body["draft"]["location"], "三饭")
+        self.assertEqual(body["state"], "ready_for_confirm")
         self.assertTrue(body["ready_for_confirm"])
         self.assertEqual(body["next_action"], "finalize_draft")
         self.assertGreaterEqual(len(body["tool_calls"]), 2)
+        self.assertEqual(body["trace"][0]["action"], "build_context")
+        self.assertEqual(body["trace"][-1]["action"], "prepare_confirmation")
 
     def test_parse_session_multi_turn_updates_same_draft(self) -> None:
         create_response = self.client.post(
@@ -161,6 +174,7 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertEqual(body["draft"]["start_time"], "2026-03-28T10:00:00+08:00")
         self.assertEqual(body["draft"]["end_time"], "2026-03-28T11:00:00+08:00")
         self.assertEqual(body["missing_fields"], [])
+        self.assertEqual(body["state"], "ready_for_confirm")
         self.assertTrue(body["ready_for_confirm"])
 
     def test_parse_session_follow_up_short_answer_fills_missing_start_time(self) -> None:
@@ -197,6 +211,7 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertEqual(body["draft"]["start_time"], "2026-03-28T09:00:00+08:00")
         self.assertIsNone(body["draft"]["end_time"])
         self.assertEqual(body["missing_fields"], [])
+        self.assertEqual(body["state"], "ready_for_confirm")
         self.assertTrue(body["ready_for_confirm"])
 
     def test_parse_session_draft_patch_preserves_manual_override(self) -> None:
@@ -228,7 +243,9 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertEqual(body["draft"]["title"], "早餐会")
         self.assertIsNone(body["draft"]["end_time"])
         self.assertEqual(body["draft"]["storage_strategy"], "sync_to_cloud_and_knowledge")
+        self.assertEqual(body["state"], "ready_for_confirm")
         self.assertEqual(body["next_action"], "finalize_draft")
+        self.assertEqual(body["trace"][-3]["source"], "manual_patch")
 
     def test_parse_session_keeps_prior_time_when_only_location_changes(self) -> None:
         create_response = self.client.post(
@@ -314,6 +331,39 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertEqual(body["draft"]["location"], "A-201")
         self.assertEqual(body["draft"]["start_time"], "2026-03-28T15:00:00+08:00")
         self.assertEqual(body["draft"]["end_time"], "2026-03-28T16:00:00+08:00")
+
+    def test_parse_session_trace_keeps_most_recent_twelve_entries(self) -> None:
+        create_response = self.client.post(
+            "/api/parse/sessions",
+            json={
+                "message": "明天上午10点到11点在A-201开会",
+                "reference_time": "2026-03-27T10:00:00+08:00",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(create_response.status_code, 200)
+        session_id = create_response.json()["parse_session_id"]
+
+        follow_up_messages = [
+            "把地点改到B-301",
+            "标题改成周会",
+            "再把备注改成同步会议",
+        ]
+        response = None
+        for message in follow_up_messages:
+            response = self.client.post(
+                f"/api/parse/sessions/{session_id}/messages",
+                json={
+                    "message": message,
+                    "reference_time": "2026-03-27T10:00:00+08:00",
+                },
+                headers=self.headers,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        assert response is not None
+        body = response.json()
+        self.assertEqual(len(body["trace"]), 12)
 
     def test_parse_session_can_keep_referenced_location_while_overriding_title(self) -> None:
         first_response = self.client.post(

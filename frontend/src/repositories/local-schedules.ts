@@ -68,6 +68,17 @@ export type LocalScheduleDraft = {
   email_remind_before_minutes?: number | null;
 };
 
+export type LocalScheduleOverlapQuery = {
+  start_time: string;
+  end_time: string | null;
+  exclude_local_id?: string | null;
+};
+
+type ScheduleTimeSpan = {
+  start: number;
+  end: number | null;
+};
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -157,6 +168,91 @@ function createLocalId(): string {
     return crypto.randomUUID();
   }
   return `local-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function parseScheduleTime(value: string): number | null {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function parseScheduleTimeSpan(startTime: string, endTime: string | null): ScheduleTimeSpan | null {
+  const start = parseScheduleTime(startTime);
+  if (start === null) {
+    return null;
+  }
+
+  if (endTime === null) {
+    return { start, end: null };
+  }
+
+  const end = parseScheduleTime(endTime);
+  if (end === null) {
+    return null;
+  }
+
+  return { start, end };
+}
+
+function timeSpansOverlap(left: ScheduleTimeSpan, right: ScheduleTimeSpan): boolean {
+  if (left.end === null && right.end === null) {
+    return left.start === right.start;
+  }
+
+  if (left.end === null) {
+    if (right.end === null) {
+      return left.start === right.start;
+    }
+    return right.start <= left.start && left.start < right.end;
+  }
+
+  if (right.end === null) {
+    return left.start <= right.start && right.start < left.end;
+  }
+
+  return left.start < right.end && right.start < left.end;
+}
+
+export function isLocalScheduleTimeOverlap(
+  left: Pick<LocalScheduleRecord, "start_time" | "end_time">,
+  right: Pick<LocalScheduleRecord, "start_time" | "end_time">
+): boolean {
+  const leftSpan = parseScheduleTimeSpan(left.start_time, left.end_time);
+  if (!leftSpan) {
+    return false;
+  }
+
+  const rightSpan = parseScheduleTimeSpan(right.start_time, right.end_time);
+  if (!rightSpan) {
+    return false;
+  }
+
+  return timeSpansOverlap(leftSpan, rightSpan);
+}
+
+export function findOverlappingLocalScheduleRecords(
+  records: LocalScheduleRecord[],
+  query: LocalScheduleOverlapQuery
+): LocalScheduleRecord[] {
+  const candidate = parseScheduleTimeSpan(query.start_time, query.end_time);
+  if (!candidate) {
+    return [];
+  }
+
+  return records.filter((record) => {
+    if (record.is_deleted) {
+      return false;
+    }
+    if (query.exclude_local_id != null && record.local_id === query.exclude_local_id) {
+      return false;
+    }
+
+    const recordSpan = parseScheduleTimeSpan(record.start_time, record.end_time);
+    if (!recordSpan) {
+      return false;
+    }
+
+    return timeSpansOverlap(recordSpan, candidate);
+  });
 }
 
 function normalizeRecord(value: unknown): LocalScheduleRecord | null {

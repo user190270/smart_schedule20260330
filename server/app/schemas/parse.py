@@ -14,6 +14,15 @@ ScheduleStorageStrategy = Literal[
     "sync_to_cloud_and_knowledge",
 ]
 ParseAgentAction = Literal["ask_follow_up", "finalize_draft"]
+ParseAgentState = Literal["clarifying", "ready_for_confirm"]
+ParseAgentTraceAction = Literal[
+    "build_context",
+    "plan_update",
+    "apply_draft_update",
+    "request_clarification",
+    "prepare_confirmation",
+]
+ParsePlanSource = Literal["runtime", "heuristic", "manual_patch"]
 ParseAgentToolName = Literal["update_draft", "ask_follow_up", "finalize_draft", "save_schedule_to_local"]
 ParseAgentMessageRole = Literal["user", "assistant"]
 
@@ -47,14 +56,6 @@ class ParseFollowUpQuestion(BaseModel):
     question: str
 
 
-class ParseDraftResponse(BaseModel):
-    draft: ScheduleDraft
-    missing_fields: list[str]
-    follow_up_questions: list[ParseFollowUpQuestion] = Field(default_factory=list)
-    requires_human_review: bool = True
-    can_persist_directly: bool = False
-
-
 class ParseSessionCreateRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     reference_time: datetime | None = None
@@ -80,14 +81,32 @@ class ParseAgentToolCall(BaseModel):
     summary: str
 
 
+class ParseAgentTraceEntry(BaseModel):
+    action: ParseAgentTraceAction
+    summary: str
+    source: ParsePlanSource | None = None
+
+
 class ParseSessionResponse(BaseModel):
     parse_session_id: str
     messages: list[ParseAgentMessage]
     draft: ScheduleDraft
     missing_fields: list[str]
     follow_up_questions: list[ParseFollowUpQuestion] = Field(default_factory=list)
+    state: ParseAgentState
     ready_for_confirm: bool
     next_action: ParseAgentAction
     tool_calls: list[ParseAgentToolCall] = Field(default_factory=list)
+    trace: list[ParseAgentTraceEntry] = Field(default_factory=list)
     latest_assistant_message: str | None = None
     draft_visible: bool = False
+
+
+class ParseDraftResponse(BaseModel):
+    draft: ScheduleDraft
+    missing_fields: list[str]
+    follow_up_questions: list[ParseFollowUpQuestion] = Field(default_factory=list)
+    state: ParseAgentState
+    trace: list[ParseAgentTraceEntry] = Field(default_factory=list)
+    requires_human_review: bool = True
+    can_persist_directly: bool = False

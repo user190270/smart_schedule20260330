@@ -146,6 +146,9 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
         self.assertEqual(body["draft"]["title"], "Design Review")
         self.assertEqual(body["draft"]["location"], "Room B")
         self.assertEqual(body["draft"]["start_time"], "2026-04-02T09:00:00+08:00")
+        self.assertEqual(body["state"], "ready_for_confirm")
+        self.assertEqual(body["trace"][0]["action"], "build_context")
+        self.assertEqual(body["trace"][1]["source"], "runtime")
         self.assertIsNotNone(captured_payloads[1]["session_context"])
         self.assertEqual(
             captured_payloads[1]["session_context"]["prior_user_turns"][0]["message"],
@@ -211,6 +214,7 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
         self.assertEqual(body["draft"]["location"], "A-201")
         self.assertEqual(body["draft"]["start_time"], "2026-04-02T09:00:00+08:00")
         self.assertEqual(body["missing_fields"], [])
+        self.assertEqual(body["state"], "ready_for_confirm")
         self.assertTrue(body["ready_for_confirm"])
 
         follow_up_context = captured_payloads[1]["session_context"]
@@ -254,6 +258,8 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
         self.assertIsNone(body["draft"]["start_time"])
         self.assertIsNone(body["draft"]["end_time"])
         self.assertIn("start_time", body["missing_fields"])
+        self.assertEqual(body["state"], "clarifying")
+        self.assertEqual(body["trace"][-1]["action"], "request_clarification")
         self.assertFalse(body["ready_for_confirm"])
         runtime.ainvoke_structured_output.assert_awaited()
 

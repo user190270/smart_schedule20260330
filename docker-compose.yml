@@ -2,6 +2,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: smart-schedule-postgres-c
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-smart_schedule}
       POSTGRES_USER: ${POSTGRES_USER:-smart_schedule}
@@ -23,6 +24,7 @@ services:
       context: ./server
       dockerfile: Dockerfile
     container_name: smart-schedule-api-c
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy

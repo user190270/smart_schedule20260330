@@ -23,7 +23,7 @@
 - `admin`: `server/app/routers/admin.py:14`、`23`。
 - `schedules`: `server/app/routers/schedules.py:14`、`27`、`37`、`59`。
 - `sync`: `server/app/routers/sync.py:16`、`26`、`36`。
-- `parse`: `server/app/routers/parse.py:22`、`37`、`67`、`78`、`92`。
+- `parse`: `server/app/routers/parse.py:29`、`61`、`109`、`137`、`169`。
 - `rag`: `server/app/routers/rag.py:22`、`41`、`55`、`74`。
 - `share`: `server/app/routers/share.py:14`、`26`。
 - `health`: `server/app/routers/health.py:8`。
@@ -43,11 +43,12 @@
 - LangChain runtime 封装：`server/app/services/ai_runtime.py:88`。
 - AI token 配额、Shanghai 日窗口与 usage ledger：`server/app/services/quota_service.py:38`、`103`、`119`、`129`。
 - 旧的 OpenAI-compatible provider：`server/app/services/llm_provider.py:16`。
-- Parse 主类入口：`server/app/services/parse_service.py:753`。
-- Parse fallback 提取：`server/app/services/parse_service.py:569`。
-- Parse runtime/fallback 合并与时间保护：`server/app/services/parse_service.py:651`、`681`。
-- Parse 会话上下文：`server/app/services/parse_service.py:912`。
-- Parse 路由层 quota 接入：`server/app/routers/parse.py:35`、`67`、`113`、`142`。
+- Parse 主类入口：`server/app/services/parse_service.py:823`。
+- Parse 状态与兼容动作派生：`server/app/services/parse_service.py:532`、`536`、`576`、`580`。
+- Parse fallback 提取：`server/app/services/parse_service.py:643`。
+- Parse runtime/fallback 合并与时间保护：`server/app/services/parse_service.py:722`、`753`、`843`。
+- Parse 会话上下文与响应组装：`server/app/services/parse_service.py:976`、`1020`。
+- Parse 路由层 quota 接入：`server/app/routers/parse.py:35`、`67`、`115`、`144`。
 - RAG 主类入口：`server/app/services/rag_service.py:132`。
 - RAG 结构化源文本：`server/app/services/rag_service.py:194`。
 - RAG 向量 SQL：`server/app/services/rag_service.py:377`。
@@ -79,7 +80,7 @@
 - 用户与 auth：`server/app/schemas/auth.py:10`、`17`、`18`、`20`、`25`、`30`、`37`、`56`。
 - 日程：`server/app/schemas/schedule.py:12`、`36`、`60`。
 - 同步：`server/app/schemas/sync.py:12`、`38`、`42`、`56`。
-- Parse：`server/app/schemas/parse.py:21`、`26`、`58`、`63`、`68`、`83`。
+- Parse：`server/app/schemas/parse.py:17`、`25`、`84`、`90`、`105`。
 - RAG：`server/app/schemas/rag.py:9`、`13`、`23`、`34`、`39`、`51`。
 - 分享：`server/app/schemas/share.py:10`、`22`。
 - Admin：`server/app/schemas/admin.py:10`、`21`。
@@ -95,7 +96,7 @@
 
 - 想改接口行为：先读对应 router，再跳 service，同步打开同名 schema。
 - 想改配额 / 层级 / token 记账：先读 `quota_service.py`，再读 `auth.py`、`parse.py`、`rag.py`，最后回看 `ai_usage_event.py` 与配额相关 migration。
-- 想改 Parse：优先读 `server/app/services/parse_service.py:569`、`765`、`912`、`995`。
+- 想改 Parse：优先读 `server/app/schemas/parse.py:17`、`84`、`90`，再读 `server/app/services/parse_service.py:532`、`922`、`976`、`1020`。
 - 想改 RAG：优先读 `server/app/services/rag_service.py:194`、`377`、`497`、`580`、`793`、`831`。
 - 想改 reminder：优先读 `server/app/services/email_reminder_service.py:57`、`113`，然后看 `server/app/services/mail_service.py:49`。
 - 想确认数据库字段：读 model，再回看对应 migration。
