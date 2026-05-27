@@ -55,15 +55,19 @@ WEEKDAY_INDEX = {
     "日": 6,
     "天": 6,
 }
+TIME_RANGE_SEPARATOR_PATTERN = r"(?:到|至|[-–—－~～]|[Tt][Oo])"
 TIME_RANGE_PATTERN = re.compile(
+    r"(?<![\d-])"
     r"(?P<start_hour>\d{1,2})"
     r"(?:(?:[:：](?P<start_minute>\d{1,2}))|(?P<start_half>半))?"
     r"(?:点|时)?"
-    r"\s*(?:到|至|\-|~|[Tt][Oo])\s*"
+    rf"\s*{TIME_RANGE_SEPARATOR_PATTERN}\s*"
     r"(?P<end_hour>\d{1,2})"
     r"(?:(?:[:：](?P<end_minute>\d{1,2}))|(?P<end_half>半))?"
     r"(?:点|时)?"
+    r"(?![\d-])"
 )
+CLOCK_TIME_PATTERN = re.compile(r"\d{1,2}[:：]\d{1,2}|\d{1,2}(?:(?:[:：]\d{1,2})|半)?(?:点|时)")
 TIME_POINT_PATTERN = re.compile(
     r"(?P<hour>\d{1,2})"
     r"(?:(?:[:：](?P<minute>\d{1,2}))|(?P<half>半))?"
@@ -89,17 +93,19 @@ DATE_WORD_PATTERN = re.compile(r"(今天|明天|后天|今早|明早|今晚|下�
 FILLER_PATTERN = re.compile(r"(帮我|安排|记得|需要|想要|请|一下|一个|把|去|在|到)")
 LEADING_LOCATION_TIME_PATTERN = re.compile(
     r"^(?:(?:今天|明天|后天|今早|明早|今晚|明晚|早上|上午|中午|下午|晚上|傍晚)\s*)*"
-    r"(?:(?:从)?\d{1,2}(?:(?:[:：]\d{1,2})|半)?(?:点|时)?(?:\s*(?:到|至|\-|~)\s*)?)+"
+    rf"(?:(?:从)?\d{{1,2}}(?:(?:[:：]\d{{1,2}})|半)?(?:点|时)?(?:\s*{TIME_RANGE_SEPARATOR_PATTERN}\s*)?)+"
     r"(?:在|到)?\s*"
 )
 TIME_LIKE_LOCATION_PATTERN = re.compile(
     r"^(?:(?:今天|明天|后天|今早|明早|今晚|明晚|早上|上午|中午|下午|晚上|傍晚)\s*)*"
     r"(?:(?:从|到|至|于)\s*)*"
     r"\d{1,2}(?:(?:[:：]\d{1,2})|半)?(?:点|时)"
-    r"(?:\s*(?:到|至|\-|~)\s*\d{1,2}(?:(?:[:：]\d{1,2})|半)?(?:点|时)?)?"
+    rf"(?:\s*{TIME_RANGE_SEPARATOR_PATTERN}\s*\d{{1,2}}(?:(?:[:：]\d{{1,2}})|半)?(?:点|时)?)?"
     r"(?:\s*(?:开始|结束))?$"
 )
 ABSOLUTE_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}|\d{1,2}月\d{1,2}日")
+ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+MONTH_DAY_PATTERN = re.compile(r"(?P<month>\d{1,2})月(?P<day>\d{1,2})日")
 CALENDAR_DATE_PATTERN = re.compile(r"(今天|明天|后天|今早|明早|今晚|明晚|下周[一二三四五六日天]|周[一二三四五六日天]|星期[一二三四五六日天])")
 
 
@@ -207,6 +213,24 @@ def _build_time(hour: int, minute: int | None, has_half: bool, meridiem: str) ->
 
 
 def _resolve_target_date(text: str, reference_time: datetime) -> date:
+    iso_date_match = ISO_DATE_PATTERN.search(text)
+    if iso_date_match:
+        try:
+            return date.fromisoformat(iso_date_match.group(0))
+        except ValueError:
+            pass
+
+    month_day_match = MONTH_DAY_PATTERN.search(text)
+    if month_day_match:
+        try:
+            return date(
+                year=reference_time.year,
+                month=int(month_day_match.group("month")),
+                day=int(month_day_match.group("day")),
+            )
+        except ValueError:
+            pass
+
     if "后天" in text:
         return (reference_time + timedelta(days=2)).date()
     if any(token in text for token in ("明天", "明早", "明晚")):
@@ -328,6 +352,26 @@ def _has_explicit_time(text: str) -> bool:
     return bool(
         TIME_RANGE_PATTERN.search(normalized)
         or TIME_POINT_PATTERN.search(normalized)
+        or END_ONLY_PATTERN.search(normalized)
+    )
+
+
+def _has_explicit_clock_signal(text: str) -> bool:
+    normalized = _normalize_common_chinese_time_digits(text)
+    return bool(
+        ISO_DATETIME_PATTERN.search(normalized)
+        or TIME_RANGE_PATTERN.search(normalized)
+        or TIME_POINT_PATTERN.search(normalized)
+        or END_ONLY_PATTERN.search(normalized)
+        or CLOCK_TIME_PATTERN.search(normalized)
+    )
+
+
+def _has_explicit_range_or_end_signal(text: str) -> bool:
+    normalized = _normalize_common_chinese_time_digits(text)
+    return bool(
+        len(_extract_iso_datetimes(normalized)) >= 2
+        or TIME_RANGE_PATTERN.search(normalized)
         or END_ONLY_PATTERN.search(normalized)
     )
 
@@ -698,11 +742,18 @@ def _normalize_string_update(update: ParseFieldUpdate | None, fallback: ParseFie
     return fallback
 
 
-def _normalize_datetime_update(update: ParseFieldUpdate | None, fallback: ParseFieldUpdate) -> ParseFieldUpdate:
+def _normalize_datetime_update(
+    update: ParseFieldUpdate | None,
+    fallback: ParseFieldUpdate,
+    reference_time: datetime,
+) -> ParseFieldUpdate:
     candidate = update or fallback
     if candidate.action == "set":
-        if _parse_iso_datetime(candidate.value):
-            return candidate
+        parsed = _parse_iso_datetime(candidate.value)
+        if parsed is not None:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=reference_time.tzinfo)
+            return _set_field(parsed.isoformat())
         return fallback
     if candidate.action in {"keep", "clear"}:
         return candidate
@@ -721,6 +772,7 @@ def _normalize_storage_update(update: ParseFieldUpdate | None, fallback: ParseFi
 def _combine_runtime_and_fallback_plan(
     parsed: ParseLLMOutput,
     fallback: ParseLLMOutput,
+    reference_time: datetime,
     preferred_fallback_fields: set[str] | None = None,
 ) -> ParseLLMOutput:
     field_names = ("title", "start_time", "end_time", "location", "remark", "storage_strategy")
@@ -738,7 +790,7 @@ def _combine_runtime_and_fallback_plan(
         ):
             parsed_update = fallback_update
         if field_name in {"start_time", "end_time"}:
-            normalized = _normalize_datetime_update(parsed_update, fallback_update)
+            normalized = _normalize_datetime_update(parsed_update, fallback_update, reference_time)
         elif field_name == "storage_strategy":
             normalized = _normalize_storage_update(parsed_update, fallback_update)
         else:
@@ -752,21 +804,26 @@ def _guard_unsupported_runtime_temporal_updates(
     base: ScheduleDraft,
     combined: ParseLLMOutput,
     fallback: ParseLLMOutput,
+    latest_message: str,
 ) -> ParseLLMOutput:
     guarded = combined.model_copy(deep=True)
+    has_clock_evidence = _has_explicit_clock_signal(latest_message)
+    has_range_or_end_evidence = _has_explicit_range_or_end_signal(latest_message)
+    has_supported_start_context = base.start_time is not None
 
     if guarded.start_time.action == "set" and fallback.start_time.action != "set":
         parsed_start = _parse_iso_datetime(guarded.start_time.value)
-        if base.start_time is None or parsed_start != base.start_time:
+        if parsed_start is None or (not has_clock_evidence and (base.start_time is None or parsed_start != base.start_time)):
             guarded.start_time = _keep_field()
-            if guarded.end_time.action == "set" and fallback.end_time.action != "set":
-                parsed_end = _parse_iso_datetime(guarded.end_time.value)
-                if base.end_time is None or parsed_end != base.end_time:
-                    guarded.end_time = _keep_field()
+        else:
+            has_supported_start_context = True
+    elif guarded.start_time.action == "set":
+        has_supported_start_context = _parse_iso_datetime(guarded.start_time.value) is not None
 
     if guarded.end_time.action == "set" and fallback.end_time.action != "set":
         parsed_end = _parse_iso_datetime(guarded.end_time.value)
-        if base.end_time is None or parsed_end != base.end_time:
+        end_changes_base = parsed_end is None or base.end_time is None or parsed_end != base.end_time
+        if end_changes_base and (not has_range_or_end_evidence or not has_supported_start_context):
             guarded.end_time = _keep_field()
 
     return guarded
@@ -900,12 +957,14 @@ class ParseService:
         combined_plan = _combine_runtime_and_fallback_plan(
             parsed,
             fallback_plan,
+            reference_time,
             preferred_fallback_fields=preferred_fallback_fields,
         )
         combined_plan = _guard_unsupported_runtime_temporal_updates(
             base_draft,
             combined_plan,
             fallback_plan,
+            text,
         )
         return _apply_update_plan(base_draft, combined_plan), "runtime"
 

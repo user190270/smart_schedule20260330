@@ -263,6 +263,116 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
         self.assertFalse(body["ready_for_confirm"])
         runtime.ainvoke_structured_output.assert_awaited()
 
+    def test_parse_runtime_uses_poster_time_range_with_reference_timezone(self) -> None:
+        async def fake_invoke_structured_output(**kwargs):
+            return ParseLLMOutput(
+                title=ParseFieldUpdate(action="set", value="毕业晚会"),
+                start_time=ParseFieldUpdate(action="set", value="2026-05-27T18:30:00"),
+                end_time=ParseFieldUpdate(action="set", value="2026-05-27T21:00:00"),
+                location=ParseFieldUpdate(action="set", value="文化活动中心青春剧场"),
+                remark=ParseFieldUpdate(action="set", value="毕业晚会正式时间"),
+                storage_strategy=ParseFieldUpdate(action="keep"),
+            )
+
+        runtime = type("FakeParseRuntime", (), {})()
+        runtime.ainvoke_structured_output = AsyncMock(side_effect=fake_invoke_structured_output)
+
+        with patch("app.services.parse_service.ParseService._get_runtime", return_value=runtime):
+            response = self.client.post(
+                "/api/parse/sessions",
+                json={
+                    "message": (
+                        "🎉 毕业晚会正式时间\n"
+                        "【晚会时间】5月27日 18:30–21:00\n"
+                        "【晚会地点】文化活动中心青春剧场\n"
+                        "【晚会内容】现场精彩节目不断，更有丰厚礼品等你来拿"
+                    ),
+                    "reference_time": "2026-05-27T09:53:00+08:00",
+                },
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["draft"]["title"], "毕业晚会")
+        self.assertEqual(body["draft"]["location"], "文化活动中心青春剧场")
+        self.assertEqual(body["draft"]["start_time"], "2026-05-27T18:30:00+08:00")
+        self.assertEqual(body["draft"]["end_time"], "2026-05-27T21:00:00+08:00")
+        self.assertEqual(body["missing_fields"], [])
+        self.assertEqual(body["state"], "ready_for_confirm")
+        self.assertTrue(body["ready_for_confirm"])
+        runtime.ainvoke_structured_output.assert_awaited()
+
+    def test_parse_runtime_cannot_fabricate_nine_oclock_for_location_only_meeting(self) -> None:
+        async def fake_invoke_structured_output(**kwargs):
+            return ParseLLMOutput(
+                title=ParseFieldUpdate(action="set", value="开会"),
+                start_time=ParseFieldUpdate(action="set", value="2026-04-02T09:00:00+08:00"),
+                end_time=ParseFieldUpdate(action="set", value="2026-04-02T10:00:00+08:00"),
+                location=ParseFieldUpdate(action="set", value="A-201"),
+                remark=ParseFieldUpdate(action="set", value="明天到A-201开会"),
+                storage_strategy=ParseFieldUpdate(action="keep"),
+            )
+
+        runtime = type("FakeParseRuntime", (), {})()
+        runtime.ainvoke_structured_output = AsyncMock(side_effect=fake_invoke_structured_output)
+
+        with patch("app.services.parse_service.ParseService._get_runtime", return_value=runtime):
+            response = self.client.post(
+                "/api/parse/sessions",
+                json={
+                    "message": "明天到A-201开会",
+                    "reference_time": "2026-04-01T21:00:00+08:00",
+                },
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["draft"]["title"], "开会")
+        self.assertEqual(body["draft"]["location"], "A-201")
+        self.assertIsNone(body["draft"]["start_time"])
+        self.assertIsNone(body["draft"]["end_time"])
+        self.assertIn("start_time", body["missing_fields"])
+        self.assertEqual(body["state"], "clarifying")
+        self.assertFalse(body["ready_for_confirm"])
+        runtime.ainvoke_structured_output.assert_awaited()
+
+    def test_parse_runtime_cannot_treat_date_only_as_precise_time_signal(self) -> None:
+        async def fake_invoke_structured_output(**kwargs):
+            return ParseLLMOutput(
+                title=ParseFieldUpdate(action="set", value="开会"),
+                start_time=ParseFieldUpdate(action="set", value="2026-05-27T09:00:00+08:00"),
+                end_time=ParseFieldUpdate(action="set", value="2026-05-27T10:00:00+08:00"),
+                location=ParseFieldUpdate(action="set", value="A-201"),
+                remark=ParseFieldUpdate(action="set", value="2026-05-27到A-201开会"),
+                storage_strategy=ParseFieldUpdate(action="keep"),
+            )
+
+        runtime = type("FakeParseRuntime", (), {})()
+        runtime.ainvoke_structured_output = AsyncMock(side_effect=fake_invoke_structured_output)
+
+        with patch("app.services.parse_service.ParseService._get_runtime", return_value=runtime):
+            response = self.client.post(
+                "/api/parse/sessions",
+                json={
+                    "message": "2026-05-27到A-201开会",
+                    "reference_time": "2026-04-01T21:00:00+08:00",
+                },
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["draft"]["title"], "开会")
+        self.assertEqual(body["draft"]["location"], "A-201")
+        self.assertIsNone(body["draft"]["start_time"])
+        self.assertIsNone(body["draft"]["end_time"])
+        self.assertIn("start_time", body["missing_fields"])
+        self.assertEqual(body["state"], "clarifying")
+        self.assertFalse(body["ready_for_confirm"])
+        runtime.ainvoke_structured_output.assert_awaited()
+
     def test_rag_paths_use_langchain_runtime_when_available(self) -> None:
         async def fake_embed_documents(texts: list[str], **kwargs) -> list[list[float]]:
             return [[round(0.01 * (index + 1), 2)] * 3072 for index, _ in enumerate(texts)]
