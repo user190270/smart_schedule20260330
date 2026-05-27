@@ -148,6 +148,8 @@ async def stream_answer(
                 payload.query,
                 prepared.answer_candidates,
                 recent_turns=prepared.recent_turns,
+                reference_time=payload.reference_time,
+                timezone_name=payload.timezone,
                 usage_callback=record_answer_usage,
             ):
                 collected_chunks.append(chunk)
