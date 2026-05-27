@@ -76,6 +76,53 @@ class ParseContractTestCase(unittest.TestCase):
         self.assertEqual(body["draft"]["end_time"], "2026-03-28T09:00:00+08:00")
         self.assertEqual(body["missing_fields"], [])
 
+    def test_parse_understands_labeled_poster_time_range_with_unicode_dash(self) -> None:
+        payload = {
+            "text": (
+                "🎉 毕业晚会正式时间\n"
+                "【晚会时间】5月27日 18:30–21:00\n"
+                "【晚会地点】文化活动中心青春剧场\n"
+                "【晚会内容】现场精彩节目不断，更有丰厚礼品等你来拿"
+            ),
+            "reference_time": "2026-05-27T09:53:00+08:00",
+        }
+        response = self.client.post("/api/parse/schedule-draft", json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+
+        body = response.json()
+        self.assertEqual(body["draft"]["start_time"], "2026-05-27T18:30:00+08:00")
+        self.assertEqual(body["draft"]["end_time"], "2026-05-27T21:00:00+08:00")
+        self.assertEqual(body["missing_fields"], [])
+        self.assertEqual(body["state"], "ready_for_confirm")
+
+    def test_parse_understands_unicode_time_range_separators(self) -> None:
+        for separator in ["-", "–", "—", "～"]:
+            with self.subTest(separator=separator):
+                payload = {
+                    "text": f"5月27日 18:30{separator}21:00 毕业晚会",
+                    "reference_time": "2026-05-27T09:53:00+08:00",
+                }
+                response = self.client.post("/api/parse/schedule-draft", json=payload, headers=self.headers)
+                self.assertEqual(response.status_code, 200)
+
+                body = response.json()
+                self.assertEqual(body["draft"]["start_time"], "2026-05-27T18:30:00+08:00")
+                self.assertEqual(body["draft"]["end_time"], "2026-05-27T21:00:00+08:00")
+                self.assertEqual(body["missing_fields"], [])
+
+    def test_parse_month_day_uses_reference_year(self) -> None:
+        payload = {
+            "text": "6月1日 18:30–21:00 毕业晚会",
+            "reference_time": "2026-05-27T09:53:00+08:00",
+        }
+        response = self.client.post("/api/parse/schedule-draft", json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+
+        body = response.json()
+        self.assertEqual(body["draft"]["start_time"], "2026-06-01T18:30:00+08:00")
+        self.assertEqual(body["draft"]["end_time"], "2026-06-01T21:00:00+08:00")
+        self.assertEqual(body["missing_fields"], [])
+
     def test_parse_allows_missing_end_time(self) -> None:
         payload = {
             "text": "明天到A-201开会",
@@ -87,6 +134,7 @@ class ParseContractTestCase(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["draft"]["title"], "开会")
         self.assertEqual(body["draft"]["location"], "A-201")
+        self.assertIsNone(body["draft"]["start_time"])
         self.assertIn("start_time", body["missing_fields"])
         self.assertIsNone(body["draft"]["end_time"])
 
