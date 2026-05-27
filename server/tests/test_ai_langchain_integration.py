@@ -410,7 +410,12 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
 
             stream_response = self.client.post(
                 "/api/rag/answer/stream",
-                json={"query": "What should I focus on?", "top_k": 5},
+                json={
+                    "query": "What should I focus on?",
+                    "top_k": 5,
+                    "reference_time": "2026-05-27T20:45:00+08:00",
+                    "timezone": "Asia/Shanghai",
+                },
                 headers=self.headers,
             )
             self.assertEqual(stream_response.status_code, 200)
@@ -428,6 +433,16 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
         self.assertEqual(candidates[0]["time_range"], "2026-04-01 17:00 -> 2026-04-01 18:00")
         self.assertEqual(candidates[0]["location"], "Room A")
         self.assertIn("Discuss async AI path isolation.", candidates[0]["remark"])
+        self.assertEqual(
+            streamed_payloads[0]["temporal_context"],
+            {
+                "reference_time": "2026-05-27T20:45:00+08:00",
+                "timezone": "Asia/Shanghai",
+                "today_date": "2026-05-27",
+                "tomorrow_date": "2026-05-28",
+                "yesterday_date": "2026-05-26",
+            },
+        )
 
         with SessionLocal() as db:
             chunk_count = len(
@@ -504,6 +519,7 @@ class AiServiceLangChainPathTestCase(unittest.TestCase):
             ],
         )
         self.assertEqual(streamed_payloads[1]["query"], "What time is it?")
+        self.assertIn("temporal_context", streamed_payloads[1])
         self.assertIn("schedule_candidates", streamed_payloads[1])
         self.assertGreaterEqual(len(streamed_payloads[1]["schedule_candidates"]), 1)
         second_embed_query = runtime.aembed_query.await_args_list[-1].args[0]

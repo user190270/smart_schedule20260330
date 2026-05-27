@@ -52,10 +52,20 @@ class RagStreamAnswerRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=3, ge=1, le=20)
     session_id: str | None = Field(default=None, min_length=1, max_length=120)
+    reference_time: datetime | None = None
+    timezone: str | None = Field(default=None, max_length=80)
 
     @field_validator("session_id")
     @classmethod
     def normalize_session_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("timezone")
+    @classmethod
+    def normalize_timezone(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()

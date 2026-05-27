@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import delete, select, text
@@ -150,6 +150,37 @@ class RagService:
             return ZoneInfo(timezone_name)
         except ZoneInfoNotFoundError:
             return ZoneInfo("Asia/Shanghai")
+
+    @staticmethod
+    def _resolve_timezone(timezone_name: str | None) -> ZoneInfo:
+        default_name = getattr(get_settings(), "app_timezone", "Asia/Shanghai") or "Asia/Shanghai"
+        candidate = (timezone_name or default_name).strip() or default_name
+        try:
+            return ZoneInfo(candidate)
+        except ZoneInfoNotFoundError:
+            try:
+                return ZoneInfo(default_name)
+            except ZoneInfoNotFoundError:
+                return ZoneInfo("Asia/Shanghai")
+
+    @staticmethod
+    def _build_temporal_context(reference_time: datetime | None, timezone_name: str | None) -> dict[str, str]:
+        local_timezone = RagService._resolve_timezone(timezone_name)
+        if reference_time is None:
+            local_reference_time = datetime.now(local_timezone)
+        elif reference_time.tzinfo is None:
+            local_reference_time = reference_time.replace(tzinfo=local_timezone)
+        else:
+            local_reference_time = reference_time.astimezone(local_timezone)
+
+        today = local_reference_time.date()
+        return {
+            "reference_time": local_reference_time.isoformat(timespec="seconds"),
+            "timezone": getattr(local_timezone, "key", "Asia/Shanghai"),
+            "today_date": today.isoformat(),
+            "tomorrow_date": (today + timedelta(days=1)).isoformat(),
+            "yesterday_date": (today - timedelta(days=1)).isoformat(),
+        }
 
     @staticmethod
     def _to_local_datetime(value: datetime | None) -> datetime | None:
@@ -794,6 +825,8 @@ class RagService:
         retrieved: RagRetrieveResponse,
         *,
         recent_turns: list[RagSessionTurn] | None = None,
+        reference_time: datetime | None = None,
+        timezone_name: str | None = None,
         before_ai_call: Callable[[], None] | None = None,
         usage_callback: UsageCallback | None = None,
     ) -> str:
@@ -808,6 +841,7 @@ class RagService:
         human_payload: dict[str, object] = {
             "query": query,
             "schedule_candidates": answer_candidates,
+            "temporal_context": RagService._build_temporal_context(reference_time, timezone_name),
         }
         if recent_turns:
             human_payload["session_history"] = RagService._build_session_history_payload(recent_turns)
@@ -820,6 +854,8 @@ class RagService:
                     "You are the knowledge-base answering service for a schedule app. "
                     "Answer only from the supplied schedule_candidates. "
                     "Each candidate is already normalized to the user's local time. "
+                    "Use temporal_context to interpret relative date words such as today, tomorrow, yesterday, 今天, 明天, and 昨天. "
+                    "When the user asks about today, prefer candidates whose date equals temporal_context.today_date. "
                     "For earliest/latest/date/time questions, compare the candidates before answering. "
                     "If the context is insufficient, say exactly which fact is missing. "
                     "If session_history is provided, use it only to resolve references in the current query."
@@ -837,6 +873,8 @@ class RagService:
         answer_candidates: list[dict[str, object]],
         *,
         recent_turns: list[RagSessionTurn] | None = None,
+        reference_time: datetime | None = None,
+        timezone_name: str | None = None,
         usage_callback: UsageCallback | None = None,
     ) -> AsyncIterator[str]:
         runtime = RagService._get_runtime()
@@ -847,6 +885,7 @@ class RagService:
         human_payload: dict[str, object] = {
             "query": query,
             "schedule_candidates": answer_candidates,
+            "temporal_context": RagService._build_temporal_context(reference_time, timezone_name),
         }
         if recent_turns:
             human_payload["session_history"] = RagService._build_session_history_payload(recent_turns)
@@ -856,6 +895,8 @@ class RagService:
                     "You are the knowledge-base answering service for a schedule app. "
                     "Answer only from the supplied schedule_candidates. "
                     "The candidates are already deduplicated by schedule and normalized to the user's local time. "
+                    "Use temporal_context to interpret relative date words such as today, tomorrow, yesterday, 今天, 明天, and 昨天. "
+                    "When the user asks about today, prefer candidates whose date equals temporal_context.today_date. "
                     "For earliest/latest/date/time questions, identify the relevant candidates first, compare their local time fields, and then answer. "
                     "If multiple candidates satisfy the query, say so clearly. "
                     "If the context is insufficient, say exactly which fact is missing. "

@@ -43,6 +43,8 @@ type RagStreamOptions = {
   topK?: number;
   sessionId?: string | null;
   baseUrl?: string;
+  referenceTime?: string;
+  timezone?: string;
 };
 
 export async function rebuildScheduleChunks(scheduleId: number, chunkSize = 320): Promise<RagChunkBuildResponse> {
@@ -75,6 +77,8 @@ export async function* streamRagAnswer(
   const topK = options.topK ?? 3;
   const sessionId = options.sessionId?.trim() || undefined;
   const baseUrl = options.baseUrl ?? api.defaults.baseURL;
+  const referenceTime = options.referenceTime ?? new Date().toISOString();
+  const timezone = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "Asia/Shanghai";
   const response = await fetch(`${baseUrl}/rag/answer/stream`, {
     method: "POST",
     headers: {
@@ -84,6 +88,8 @@ export async function* streamRagAnswer(
     body: JSON.stringify({
       query,
       top_k: topK,
+      reference_time: referenceTime,
+      timezone,
       ...(sessionId ? { session_id: sessionId } : {})
     })
   });
